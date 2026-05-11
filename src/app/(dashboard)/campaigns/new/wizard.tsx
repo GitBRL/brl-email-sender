@@ -1,9 +1,15 @@
 'use client';
 
-import { useState, useTransition, useEffect } from 'react';
+import { useState, useTransition, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, FileText, Users, Send, Settings, Palette, Sparkles, Megaphone, Tag, Rocket } from 'lucide-react';
-import { createCampaign, updateCampaign, previewRecipients, sendCampaign, useStarterForCampaign } from '../actions';
+import {
+  Check, FileText, Users, Send, Settings, Palette, Sparkles, Megaphone, Tag, Rocket,
+  Pencil, ExternalLink, RefreshCw, Upload, Mail,
+} from 'lucide-react';
+import {
+  createCampaign, updateCampaign, previewRecipients, sendCampaign,
+  useStarterForCampaign, getCampaignPreviewHtml, sendTestEmail,
+} from '../actions';
 import type { ContactTag } from '@/types';
 import { cn } from '@/lib/utils';
 import type { BrandKit } from '@/lib/brand-kits';
@@ -13,7 +19,7 @@ type Template = { id: string; name: string; updated_at: string; brand_kit_id: st
 type List = { id: string; name: string; contact_count: number };
 type StarterMeta = { id: string; name: string; description: string; category: string };
 
-const STEPS = ['Kit', 'Settings', 'Template', 'Audience', 'Review'] as const;
+const STEPS = ['Kit', 'Settings', 'Template', 'Edit', 'Audience', 'Review'] as const;
 type Step = (typeof STEPS)[number];
 
 /** Match a starter to a Lucide icon based on its built-in id suffix. */
@@ -54,8 +60,25 @@ export function Wizard({
   const [replyTo, setReplyTo] = useState('');
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [starterId, setStarterId] = useState<string | null>(null);
+  // After useStarterForCampaign clones a starter we keep the resulting template
+  // id here so the Edit/Review steps can deep-link to /templates/<id>/edit and
+  // call getCampaignPreviewHtml() against it.
+  const [clonedTemplateId, setClonedTemplateId] = useState<string | null>(null);
+  const effectiveTemplateId = templateId ?? clonedTemplateId;
+
   const [listIds, setListIds] = useState<string[]>([]);
   const [filterTag, setFilterTag] = useState<ContactTag | ''>('');
+
+  // Live preview state (used by Edit + Review steps)
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewSubject, setPreviewSubject] = useState<string>('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // Send-test field state (Review step)
+  const [testEmail, setTestEmail] = useState('');
+  const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [testMessage, setTestMessage] = useState<string | null>(null);
 
   // Filter the templates shown in step 'Template' to those matching the
   // selected brand kit (plus templates with no kit, since they're brand-agnostic).
@@ -63,6 +86,28 @@ export function Wizard({
     ? templates.filter((t) => !t.brand_kit_id || t.brand_kit_id === brandKitId)
     : templates;
   const selectedKit = brandKitId ? kits.find((k) => k.id === brandKitId) ?? null : null;
+
+  /** Re-fetch the rendered HTML for the iframe. Memoised so we can call it
+   *  from both useEffect (auto on entering Edit/Review) and from buttons. */
+  const refreshPreview = useCallback(async () => {
+    if (!campaignId) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    const res = await getCampaignPreviewHtml(campaignId);
+    setPreviewLoading(false);
+    if (!res.ok) {
+      setPreviewError(res.error);
+      return;
+    }
+    setPreviewHtml(res.html);
+    setPreviewSubject(res.subject);
+  }, [campaignId]);
+
+  // Auto-refresh on entering Edit or Review (the user may have edited the
+  // template in another tab between steps).
+  useEffect(() => {
+    if (step === 'Edit' || step === 'Review') refreshPreview();
+  }, [step, refreshPreview]);
 
   // Recipient preview
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
@@ -106,21 +151,29 @@ export function Wizard({
     });
   }
 
-  function gotoAudience() {
+  // After Template selection: persist the choice (clone the starter if needed)
+  // and advance to the Edit step where the user customises the rendered email.
+  function gotoEdit() {
     setError(null);
     if (!templateId && !starterId) return setError('Escolha um modelo ou template antes de continuar.');
     start(async () => {
-      // Two paths: a starter is cloned + themed + linked in one server action;
-      // an existing template is linked directly via updateCampaign.
       if (starterId) {
         const res = await useStarterForCampaign(campaignId!, starterId);
-        if (!res.ok) return setError(res.error ?? 'Failed to apply starter');
+        if (!res.ok || !res.id) return setError(res.error ?? 'Failed to apply starter');
+        setClonedTemplateId(res.id);
+        setStarterId(null); // starter is now a real template; future visits use clonedTemplateId
       } else {
         const res = await updateCampaign(campaignId!, { template_id: templateId });
         if (!res.ok) return setError(res.error ?? 'Failed to save');
       }
-      setStep('Audience');
+      setStep('Edit');
     });
+  }
+
+  // From Edit step → just advance; the template is already saved
+  function gotoAudience() {
+    setError(null);
+    setStep('Audience');
   }
 
   function gotoReview() {
@@ -316,7 +369,7 @@ export function Wizard({
               <button
                 type="button"
                 disabled={pending || (!templateId && !starterId)}
-                onClick={gotoAudience}
+                onClick={gotoEdit}
                 className={primaryBtn}
               >
                 {pending ? 'Salvando…' : 'Continuar →'}
@@ -325,19 +378,104 @@ export function Wizard({
           </div>
         )}
 
+        {step === 'Edit' && (
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold">Edite o template</h2>
+                <p className="text-sm text-zinc-500 mt-0.5">
+                  Personalize textos, imagens, botões e cores. O preview à direita reflete exatamente como o email será enviado (com merge tags resolvidos para um destinatário de exemplo).
+                </p>
+              </div>
+              <div className="shrink-0 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={refreshPreview}
+                  disabled={previewLoading}
+                  className={secondaryBtn + ' inline-flex items-center gap-1.5'}
+                  title="Re-buscar HTML após editar em outra aba"
+                >
+                  <RefreshCw size={14} className={previewLoading ? 'animate-spin' : ''} />
+                  Atualizar preview
+                </button>
+                {effectiveTemplateId && (
+                  <a
+                    href={`/templates/${effectiveTemplateId}/edit`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-3 py-2 text-sm hover:bg-brl-yellow-hover"
+                  >
+                    <ExternalLink size={14} />
+                    Abrir editor
+                  </a>
+                )}
+              </div>
+            </div>
+
+            <PreviewPane
+              html={previewHtml}
+              loading={previewLoading}
+              error={previewError}
+              subject={previewSubject}
+              from={`${fromName} <${fromEmail}>`}
+            />
+
+            <p className="text-[11px] text-zinc-500">
+              Edite no editor (abre em nova aba), salve, depois volte aqui e clique em <strong>Atualizar preview</strong> para ver as mudanças antes de continuar.
+            </p>
+
+            <Footer>
+              <button type="button" onClick={() => setStep('Template')} className={secondaryBtn}>← Voltar</button>
+              <button type="button" onClick={gotoAudience} className={primaryBtn}>Continuar →</button>
+            </Footer>
+          </div>
+        )}
+
         {step === 'Audience' && (
           <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold mb-2">Lists</h3>
-              {lists.length === 0 ? (
-                <p className="text-sm text-zinc-500">
-                  No lists yet (you can still send to all subscribed contacts via tag filter).{' '}
-                  <a href="/lists" className="underline">Create lists →</a>
-                </p>
-              ) : (
-                <div className="space-y-1">
+            <div className="flex items-start justify-between gap-4">
+              <h3 className="text-sm font-semibold">Listas</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => router.refresh()}
+                  className={secondaryBtn + ' inline-flex items-center gap-1.5'}
+                  title="Re-buscar listas após importar"
+                >
+                  <RefreshCw size={12} /> Atualizar
+                </button>
+                <a
+                  href="/contacts/import"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-3 py-1.5 text-xs hover:bg-brl-yellow-hover"
+                >
+                  <Upload size={12} /> Importar contatos
+                </a>
+              </div>
+            </div>
+            <select
+              value={listIds[0] ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) setListIds([]);
+                else setListIds([v]);
+              }}
+              className={inputCls}
+            >
+              <option value="">— Todos os contatos inscritos —</option>
+              {lists.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name} ({l.contact_count} contatos)
+                </option>
+              ))}
+            </select>
+            {lists.length > 1 && (
+              <details className="text-xs text-zinc-500">
+                <summary className="cursor-pointer hover:text-zinc-700">Selecionar várias listas</summary>
+                <div className="mt-2 space-y-1 pl-2 border-l border-zinc-200">
                   {lists.map((l) => (
-                    <label key={l.id} className="flex items-center gap-2 text-sm py-1">
+                    <label key={l.id} className="flex items-center gap-2 text-sm py-0.5">
                       <input
                         type="checkbox"
                         checked={listIds.includes(l.id)}
@@ -353,64 +491,176 @@ export function Wizard({
                     </label>
                   ))}
                 </div>
-              )}
-            </div>
+              </details>
+            )}
+            {lists.length === 0 && (
+              <p className="text-xs text-zinc-500">
+                Nenhuma lista cadastrada ainda. Use <strong>Importar contatos</strong> acima para subir um CSV — ele cria contatos e (opcionalmente) uma lista nova. Você também pode criar listas manualmente em <a href="/lists" target="_blank" className="underline">/lists</a>.
+              </p>
+            )}
             <div>
-              <h3 className="text-sm font-semibold mb-2">Filter by tag (optional)</h3>
+              <h3 className="text-sm font-semibold mb-2">Filtrar por tag (opcional)</h3>
               <select value={filterTag} onChange={(e) => setFilterTag(e.target.value as ContactTag | '')} className={inputCls}>
-                <option value="">All tags</option>
-                <option value="hot">hot only</option>
-                <option value="warm">warm only</option>
-                <option value="cold">cold only</option>
+                <option value="">Todas as tags</option>
+                <option value="hot">somente hot</option>
+                <option value="warm">somente warm</option>
+                <option value="cold">somente cold</option>
               </select>
               <p className="text-[11px] text-zinc-500 mt-1">
-                Leave both empty to send to every subscribed contact.
+                Sem lista e sem tag = envia para todos os contatos com status &ldquo;subscribed&rdquo;.
               </p>
             </div>
             {error && <ErrorBox>{error}</ErrorBox>}
             <Footer>
-              <button type="button" onClick={() => setStep('Template')} className={secondaryBtn}>← Back</button>
-              <button type="button" disabled={pending} onClick={gotoReview} className={primaryBtn}>{pending ? 'Saving…' : 'Continue →'}</button>
+              <button type="button" onClick={() => setStep('Edit')} className={secondaryBtn}>← Voltar</button>
+              <button type="button" disabled={pending} onClick={gotoReview} className={primaryBtn}>{pending ? 'Salvando…' : 'Continuar →'}</button>
             </Footer>
           </div>
         )}
 
         {step === 'Review' && (
-          <div className="space-y-4">
-            <Stat label="Recipients" value={recipientCount === null ? '—' : recipientCount.toLocaleString('pt-BR')} />
-            {recipientSample.length > 0 && (
-              <p className="text-xs text-zinc-500">
-                e.g. {recipientSample.slice(0, 3).join(', ')}{recipientSample.length > 3 ? '…' : ''}
-              </p>
-            )}
-            <dl className="bg-zinc-50 rounded-md border border-zinc-200 p-4 text-sm divide-y divide-zinc-200">
-              <Row label="Subject" value={subject} />
-              <Row label="From" value={`${fromName} <${fromEmail}>`} />
-              {replyTo && <Row label="Reply-to" value={replyTo} />}
-              <Row
-                label="Template"
-                value={
-                  templateId
-                    ? templates.find((t) => t.id === templateId)?.name ?? '—'
-                    : starterId
-                      ? `${starters.find((s) => s.id === starterId)?.name ?? 'Modelo'} (auto-temado)`
-                      : '—'
-                }
-              />
-              <Row label="Lists" value={listIds.length === 0 ? 'all' : `${listIds.length} selected`} />
-              <Row label="Tag filter" value={filterTag || 'all'} />
-            </dl>
-            {error && <ErrorBox>{error}</ErrorBox>}
-            <Footer>
-              <button type="button" onClick={() => setStep('Audience')} className={secondaryBtn}>← Back</button>
+          <div className="space-y-5">
+            {/* Top bar with primary Send button */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold">Revisar e enviar</h2>
+                <p className="text-sm text-zinc-500 mt-0.5">
+                  Veja exatamente como o email vai chegar, envie um teste e dispare a campanha.
+                </p>
+              </div>
               <button
                 type="button"
                 disabled={pending || !recipientCount}
                 onClick={send}
-                className="inline-flex items-center gap-1 rounded-md bg-brl-yellow text-brl-dark font-semibold px-4 py-2 text-sm hover:bg-brl-yellow-hover disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-4 py-2 text-sm hover:bg-brl-yellow-hover disabled:opacity-50 shrink-0 shadow-sm"
+                title={!recipientCount ? 'Nenhum destinatário corresponde a este público' : `Enviar para ${recipientCount} destinatário(s)`}
               >
-                <Send size={14} /> {pending ? 'Sending…' : `Send now`}
+                <Send size={14} /> {pending ? 'Enviando…' : `Enviar campanha${recipientCount ? ` (${recipientCount})` : ''}`}
               </button>
+            </div>
+
+            {/* Headline counters */}
+            <div className="grid grid-cols-2 gap-3">
+              <Stat label="Destinatários" value={recipientCount === null ? '—' : recipientCount.toLocaleString('pt-BR')} />
+              <div className="bg-zinc-50 border border-zinc-200 rounded-md p-4">
+                <div className="text-xs uppercase tracking-wide text-zinc-500">Amostra</div>
+                <div className="text-xs text-zinc-700 mt-1 leading-snug">
+                  {recipientSample.length > 0
+                    ? recipientSample.slice(0, 3).join(', ') + (recipientSample.length > 3 ? '…' : '')
+                    : '—'}
+                </div>
+              </div>
+            </div>
+
+            {/* Live email preview (iframe — full HTML rendered exactly as it'll be sent) */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Preview do email</h3>
+                <button
+                  type="button"
+                  onClick={refreshPreview}
+                  disabled={previewLoading}
+                  className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+                >
+                  <RefreshCw size={11} className={previewLoading ? 'animate-spin' : ''} />
+                  Atualizar
+                </button>
+              </div>
+              <PreviewPane
+                html={previewHtml}
+                loading={previewLoading}
+                error={previewError}
+                subject={previewSubject}
+                from={`${fromName} <${fromEmail}>`}
+              />
+            </div>
+
+            {/* Send a test */}
+            <div className="rounded-md border border-zinc-200 bg-zinc-50/50 p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 flex items-center gap-1.5 mb-1.5">
+                <Mail size={12} /> Enviar teste
+              </h3>
+              <p className="text-[11px] text-zinc-500 mb-2">
+                Envia uma cópia única para o endereço informado. Não cria registro de envio nem afeta as métricas.
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!campaignId || !testEmail.trim()) return;
+                  setTestStatus('sending');
+                  setTestMessage(null);
+                  sendTestEmail(campaignId, testEmail).then((res) => {
+                    if (res.ok) {
+                      setTestStatus('sent');
+                      setTestMessage(`Enviado para ${testEmail}`);
+                    } else {
+                      setTestStatus('error');
+                      setTestMessage(res.error ?? 'Falha no envio');
+                    }
+                  });
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  type="email"
+                  value={testEmail}
+                  onChange={(e) => {
+                    setTestEmail(e.target.value);
+                    setTestStatus('idle');
+                    setTestMessage(null);
+                  }}
+                  placeholder="seu-email@exemplo.com"
+                  className={inputCls}
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={testStatus === 'sending' || !testEmail.trim()}
+                  className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 shrink-0 inline-flex items-center gap-1.5"
+                >
+                  <Send size={13} /> {testStatus === 'sending' ? 'Enviando…' : 'Enviar teste'}
+                </button>
+              </form>
+              {testMessage && (
+                <p
+                  className={cn(
+                    'text-xs mt-2',
+                    testStatus === 'sent' ? 'text-emerald-700' : 'text-brl-error',
+                  )}
+                >
+                  {testMessage}
+                </p>
+              )}
+            </div>
+
+            {/* Summary */}
+            <details>
+              <summary className="text-xs font-semibold uppercase tracking-wide text-zinc-500 cursor-pointer hover:text-zinc-900 mb-2">
+                Resumo da campanha
+              </summary>
+              <dl className="bg-white rounded-md border border-zinc-200 p-4 text-sm divide-y divide-zinc-200 mt-2">
+                <Row label="Subject" value={subject} />
+                <Row label="From" value={`${fromName} <${fromEmail}>`} />
+                {replyTo && <Row label="Reply-to" value={replyTo} />}
+                <Row
+                  label="Template"
+                  value={
+                    templateId
+                      ? templates.find((t) => t.id === templateId)?.name ?? '—'
+                      : clonedTemplateId
+                        ? `Modelo ${starters.find((s) => s.id === starterId)?.name ?? ''} (auto-temado)`
+                        : '—'
+                  }
+                />
+                <Row label="Listas" value={listIds.length === 0 ? 'todas' : `${listIds.length} selecionada(s)`} />
+                <Row label="Tag" value={filterTag || 'todas'} />
+              </dl>
+            </details>
+
+            {error && <ErrorBox>{error}</ErrorBox>}
+            <Footer>
+              <button type="button" onClick={() => setStep('Audience')} className={secondaryBtn}>← Voltar</button>
+              <span />
             </Footer>
           </div>
         )}
@@ -421,7 +671,7 @@ export function Wizard({
 
 function Stepper({ current }: { current: Step }) {
   const idx = STEPS.indexOf(current);
-  const ICONS = [Palette, Settings, FileText, Users, Send];
+  const ICONS = [Palette, Settings, FileText, Pencil, Users, Send];
   return (
     <ol className="flex items-center mb-6 text-xs">
       {STEPS.map((s, i) => {
@@ -476,6 +726,63 @@ function Footer({ children }: { children: React.ReactNode }) {
 }
 function ErrorBox({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-brl-error bg-red-50 border border-red-100 rounded px-3 py-2">{children}</p>;
+}
+
+/**
+ * Browser-frame style preview of the rendered campaign HTML. Uses iframe
+ * srcDoc so the email's own <style> tags + tables don't bleed into the
+ * surrounding wizard layout. Shows the From/Subject in a fake email header
+ * above the iframe so the user has the full visual context.
+ */
+function PreviewPane({
+  html,
+  loading,
+  error,
+  subject,
+  from,
+}: {
+  html: string | null;
+  loading: boolean;
+  error: string | null;
+  subject: string;
+  from: string;
+}) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white overflow-hidden">
+      <div className="border-b border-zinc-100 px-4 py-2.5 bg-zinc-50/60 text-xs space-y-0.5">
+        <div className="flex gap-2">
+          <span className="text-zinc-500 w-12 shrink-0">From:</span>
+          <span className="font-medium text-zinc-800 truncate">{from}</span>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-zinc-500 w-12 shrink-0">Assunto:</span>
+          <span className="font-semibold text-zinc-900 truncate">{subject || '(sem assunto)'}</span>
+        </div>
+      </div>
+      <div className="bg-zinc-100 p-4">
+        {loading && (
+          <div className="h-[600px] grid place-items-center text-sm text-zinc-500">
+            <span className="inline-flex items-center gap-2">
+              <RefreshCw size={14} className="animate-spin" /> Carregando preview…
+            </span>
+          </div>
+        )}
+        {!loading && error && (
+          <div className="h-[200px] grid place-items-center text-sm text-brl-error">
+            {error}
+          </div>
+        )}
+        {!loading && !error && html && (
+          <iframe
+            srcDoc={html}
+            title="Email preview"
+            sandbox="allow-same-origin"
+            className="w-full h-[680px] bg-white rounded shadow-sm border border-zinc-200"
+          />
+        )}
+      </div>
+    </div>
+  );
 }
 
 /**

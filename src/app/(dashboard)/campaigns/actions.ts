@@ -78,6 +78,122 @@ export async function deleteCampaign(id: string): Promise<ActionState> {
 }
 
 /**
+ * Render the campaign's email exactly as it will be sent — with merge tags
+ * personalised against a synthetic test recipient and tracking links rewritten
+ * to point at this app. Used by the wizard's preview iframe (Edit + Review
+ * steps). Returns the full HTML string ready to drop into an iframe srcdoc.
+ *
+ * Test recipient values intentionally use generic placeholders so the user
+ * can see what `{{name}}` etc. will look like for a real subscriber.
+ */
+export async function getCampaignPreviewHtml(
+  campaignId: string,
+): Promise<{ ok: true; html: string; subject: string } | { ok: false; error: string }> {
+  await requireRole('viewer');
+  const supabase = createServiceClient();
+
+  const { data: campaign } = await supabase
+    .from('campaigns')
+    .select('subject, template_id')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (!campaign) return { ok: false, error: 'Campaign not found' };
+  if (!campaign.template_id) return { ok: false, error: 'No template selected yet' };
+
+  const { data: template } = await supabase
+    .from('templates')
+    .select('html_content')
+    .eq('id', campaign.template_id)
+    .maybeSingle();
+  if (!template?.html_content) return { ok: false, error: 'Template HTML is empty' };
+
+  const prepared = prepareCampaignHtml(template.html_content, campaignId);
+  const sample = {
+    id: 'preview-recipient',
+    email: 'preview@brleducacao.com.br',
+    name: 'Maria Silva',
+    phone: null,
+    company: null,
+    custom_fields: null,
+  };
+  const html = personalize(prepared.html, sample);
+  const subject = personalizeSubject(campaign.subject ?? '', sample);
+
+  return { ok: true, html, subject };
+}
+
+/**
+ * Send a single test email of the campaign to one address — used by the
+ * "Enviar teste" form on the Review step. Does NOT mutate campaign state,
+ * does NOT create a campaign_recipients row, does NOT mark the campaign as
+ * sent. Tracking pixel + link rewriting still apply so the user sees the
+ * real shape of the email.
+ */
+export async function sendTestEmail(
+  campaignId: string,
+  toEmail: string,
+): Promise<ActionState> {
+  await requireRole('editor');
+  const supabase = createServiceClient();
+
+  const trimmed = toEmail.trim().toLowerCase();
+  const emailOk = z.string().email().safeParse(trimmed);
+  if (!emailOk.success) return { ok: false, error: 'Endereço de email inválido.' };
+
+  const { data: campaign } = await supabase
+    .from('campaigns')
+    .select('subject, template_id, from_name, from_email, reply_to')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (!campaign) return { ok: false, error: 'Campaign not found.' };
+  if (!campaign.template_id) return { ok: false, error: 'Pick a template first.' };
+
+  const { data: template } = await supabase
+    .from('templates')
+    .select('html_content')
+    .eq('id', campaign.template_id)
+    .maybeSingle();
+  if (!template?.html_content) return { ok: false, error: 'Template HTML is empty.' };
+
+  const prepared = prepareCampaignHtml(template.html_content, campaignId);
+  const sample = {
+    id: 'test-recipient',
+    email: trimmed,
+    name: 'Teste',
+    phone: null,
+    company: null,
+    custom_fields: null,
+  };
+  const html = personalize(prepared.html, sample);
+  const subject = `[TESTE] ${personalizeSubject(campaign.subject ?? '', sample)}`;
+
+  const { data: appSettings } = await supabase
+    .from('app_settings')
+    .select('from_name, from_email, reply_to')
+    .eq('id', true)
+    .maybeSingle();
+  const effFromName = campaign.from_name || appSettings?.from_name || FROM_NAME;
+  const effFromEmail = campaign.from_email || appSettings?.from_email || FROM_EMAIL;
+  const effReplyTo = campaign.reply_to ?? appSettings?.reply_to ?? undefined;
+  const fromHeader = `${effFromName} <${effFromEmail}>`;
+
+  try {
+    const { error: sendErr } = await resend.emails.send({
+      from: fromHeader,
+      to: trimmed,
+      subject,
+      html,
+      replyTo: effReplyTo ?? undefined,
+    });
+    if (sendErr) return { ok: false, error: sendErr.message };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  return { ok: true };
+}
+
+/**
  * Wizard-only convenience action: take a starter template id (`builtin:*` or
  * a DB template flagged is_starter), clone it, re-theme the blocks with the
  * campaign's selected brand kit, persist it as a new template row, and link
