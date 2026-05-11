@@ -7,9 +7,20 @@ import { DEFAULT_DOCUMENT, type TemplateDocument } from '@/lib/blocks';
 import type { BrandKit } from '@/lib/brand-kits';
 import { TemplateEditor } from './editor';
 
-export default async function EditTemplatePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditTemplatePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ embedded?: string }>;
+}) {
   const profile = await requireRole('editor');
   const { id } = await params;
+  const sp = await searchParams;
+  // Strip the page chrome (header, back-link, kit badge) when this route is
+  // loaded inside an iframe via ?embedded=1 — the parent (campaign wizard)
+  // already supplies its own breadcrumb / kit context.
+  const embedded = sp.embedded === '1' || sp.embedded === 'true';
   const supabase = createServiceClient();
   const { data: template } = await supabase
     .from('templates')
@@ -35,32 +46,34 @@ export default async function EditTemplatePage({ params }: { params: Promise<{ i
 
   return (
     <div className="h-screen flex flex-col bg-brl-bg">
-      <header className="flex items-center justify-between px-6 py-3 border-b border-zinc-200 bg-white">
-        <div className="flex items-center gap-3">
-          <Link href="/templates" className="text-zinc-500 hover:text-brl-dark inline-flex items-center gap-1 text-sm">
-            <ChevronLeft size={14} /> Templates
-          </Link>
-          {kit && (
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium"
-              style={{
-                background: kit.color_header_bg,
-                color:
-                  kit.color_header_bg.toLowerCase() === '#ffffff'
-                    ? kit.color_primary
-                    : kit.color_cta_text,
-              }}
-              title="Brand kit aplicado a este template"
-            >
+      {!embedded && (
+        <header className="flex items-center justify-between px-6 py-3 border-b border-zinc-200 bg-white">
+          <div className="flex items-center gap-3">
+            <Link href="/templates" className="text-zinc-500 hover:text-brl-dark inline-flex items-center gap-1 text-sm">
+              <ChevronLeft size={14} /> Templates
+            </Link>
+            {kit && (
               <span
-                className="inline-block w-2 h-2 rounded-full"
-                style={{ background: kit.color_primary }}
-              />
-              {kit.name}
-            </span>
-          )}
-        </div>
-      </header>
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium"
+                style={{
+                  background: kit.color_header_bg,
+                  color:
+                    kit.color_header_bg.toLowerCase() === '#ffffff'
+                      ? kit.color_primary
+                      : kit.color_cta_text,
+                }}
+                title="Brand kit aplicado a este template"
+              >
+                <span
+                  className="inline-block w-2 h-2 rounded-full"
+                  style={{ background: kit.color_primary }}
+                />
+                {kit.name}
+              </span>
+            )}
+          </div>
+        </header>
+      )}
       <div className="flex-1 overflow-hidden">
         <TemplateEditor
           templateId={template.id}

@@ -9,6 +9,15 @@ import { DEFAULT_DOCUMENT, uid, type TemplateDocument, type Block, type ButtonBl
 import { findStarter } from '@/lib/starter-templates';
 import { defaultDocForKit, type BrandKit } from '@/lib/brand-kits';
 
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB (matches storage bucket cap)
+const ALLOWED_IMAGE_MIMES = new Set([
+  'image/png',
+  'image/svg+xml',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+]);
+
 export type ActionState = { ok: boolean; error?: string; id?: string };
 
 const CreateTemplateInput = z.object({
@@ -172,4 +181,59 @@ export async function duplicateTemplate(id: string): Promise<ActionState> {
   if (error) return { ok: false, error: error.message };
   revalidatePath('/templates');
   return { ok: true, id: data.id };
+}
+
+/**
+ * Upload an image from the editor to the `email-images` storage bucket and
+ * return its public URL. The editor's ImageUploader calls this when the user
+ * picks a file, then stuffs the returned URL into block.src — so editors
+ * never have to know what a URL is, let alone an HTML tag.
+ *
+ * Returns { ok, url, error } so the calling client can render a friendly
+ * inline error without throwing.
+ */
+export async function uploadEmailImage(formData: FormData): Promise<{ ok: boolean; url?: string; error?: string }> {
+  await requireRole('editor');
+
+  const file = formData.get('file');
+  if (!(file instanceof File)) return { ok: false, error: 'Nenhum arquivo recebido.' };
+  if (file.size === 0) return { ok: false, error: 'Arquivo vazio.' };
+  if (file.size > MAX_IMAGE_BYTES) {
+    return {
+      ok: false,
+      error: `Imagem muito grande (máx ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB).`,
+    };
+  }
+  if (!ALLOWED_IMAGE_MIMES.has(file.type)) {
+    return {
+      ok: false,
+      error: `Tipo de arquivo não suportado (${file.type || 'desconhecido'}). Use PNG, JPEG, SVG, WebP ou GIF.`,
+    };
+  }
+
+  // Path: `<yyyy-mm>/<uuid>.<ext>` keeps things tidy in the bucket and lets
+  // us scope monthly cleanup later if needed.
+  const ext = (() => {
+    switch (file.type) {
+      case 'image/png': return 'png';
+      case 'image/svg+xml': return 'svg';
+      case 'image/jpeg': return 'jpg';
+      case 'image/webp': return 'webp';
+      case 'image/gif': return 'gif';
+      default: return file.name.split('.').pop() ?? 'bin';
+    }
+  })();
+  const today = new Date();
+  const folder = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const path = `${folder}/${uid()}.${ext}`;
+
+  const supabase = createServiceClient();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const { error: upErr } = await supabase.storage
+    .from('email-images')
+    .upload(path, bytes, { contentType: file.type, upsert: false });
+  if (upErr) return { ok: false, error: `Upload falhou: ${upErr.message}` };
+
+  const { data: pub } = supabase.storage.from('email-images').getPublicUrl(path);
+  return { ok: true, url: pub.publicUrl };
 }

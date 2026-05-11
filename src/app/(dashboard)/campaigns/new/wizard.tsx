@@ -103,10 +103,10 @@ export function Wizard({
     setPreviewSubject(res.subject);
   }, [campaignId]);
 
-  // Auto-refresh on entering Edit or Review (the user may have edited the
-  // template in another tab between steps).
+  // Auto-refresh the preview when entering Review (the user may have edited
+  // the template in the inline editor on the previous step).
   useEffect(() => {
-    if (step === 'Edit' || step === 'Review') refreshPreview();
+    if (step === 'Review') refreshPreview();
   }, [step, refreshPreview]);
 
   // Recipient preview
@@ -379,50 +379,46 @@ export function Wizard({
         )}
 
         {step === 'Edit' && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Edite o template</h2>
                 <p className="text-sm text-zinc-500 mt-0.5">
-                  Personalize textos, imagens, botões e cores. O preview à direita reflete exatamente como o email será enviado (com merge tags resolvidos para um destinatário de exemplo).
+                  Arraste blocos da lateral esquerda, edite no centro, ajuste cores/imagens à direita.
+                  Use o botão <strong>Salvar</strong> dentro do editor — depois clique em Continuar.
                 </p>
               </div>
-              <div className="shrink-0 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={refreshPreview}
-                  disabled={previewLoading}
-                  className={secondaryBtn + ' inline-flex items-center gap-1.5'}
-                  title="Re-buscar HTML após editar em outra aba"
-                >
-                  <RefreshCw size={14} className={previewLoading ? 'animate-spin' : ''} />
-                  Atualizar preview
-                </button>
-                {effectiveTemplateId && (
-                  <a
-                    href={`/templates/${effectiveTemplateId}/edit`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-3 py-2 text-sm hover:bg-brl-yellow-hover"
-                  >
-                    <ExternalLink size={14} />
-                    Abrir editor
-                  </a>
-                )}
-              </div>
+              <a
+                href={effectiveTemplateId ? `/templates/${effectiveTemplateId}/edit` : '#'}
+                target="_blank"
+                rel="noreferrer"
+                className={secondaryBtn + ' inline-flex items-center gap-1.5 shrink-0'}
+                title="Abrir editor em nova aba (tela cheia)"
+              >
+                <ExternalLink size={13} />
+                Tela cheia
+              </a>
             </div>
 
-            <PreviewPane
-              html={previewHtml}
-              loading={previewLoading}
-              error={previewError}
-              subject={previewSubject}
-              from={`${fromName} <${fromEmail}>`}
-            />
-
-            <p className="text-[11px] text-zinc-500">
-              Edite no editor (abre em nova aba), salve, depois volte aqui e clique em <strong>Atualizar preview</strong> para ver as mudanças antes de continuar.
-            </p>
+            {/* Inline editor — same component as /templates/[id]/edit, just
+                wrapped in an iframe with ?embedded=1 so the dashboard sidebar
+                + page header are stripped, leaving only the 3-column editor
+                (palette / canvas / properties). Iframe gives perfect CSS
+                isolation without refactoring the editor for embedding. */}
+            {effectiveTemplateId ? (
+              <div className="rounded-md border border-zinc-200 overflow-hidden bg-white">
+                <iframe
+                  src={`/templates/${effectiveTemplateId}/edit?embedded=1`}
+                  title="Editor de template"
+                  className="w-full bg-white block"
+                  style={{ height: 'calc(100vh - 240px)', minHeight: 600 }}
+                />
+              </div>
+            ) : (
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-8 text-center text-sm text-zinc-500">
+                Carregando editor…
+              </div>
+            )}
 
             <Footer>
               <button type="button" onClick={() => setStep('Template')} className={secondaryBtn}>← Voltar</button>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useCallback, createContext, useContext } from 'react';
+import { useState, useTransition, useCallback, createContext, useContext, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BrandKit } from '@/lib/brand-kits';
 import { kitPalette } from '@/lib/brand-kits';
@@ -8,13 +8,13 @@ import { kitPalette } from '@/lib/brand-kits';
 const BrandKitContext = createContext<BrandKit | null>(null);
 import {
   Type, Heading1, Image as ImageIcon, MousePointerClick, Minus, Square, Mail, Trash2, ChevronUp, ChevronDown, Eye, Save, GripVertical,
-  Building2,
+  Building2, Upload, Link as LinkIcon, X,
 } from 'lucide-react';
 import {
   type Block, type TemplateDocument, type ButtonBlock, type ImageBlock, type HeaderBlock, type TextBlock,
   type DividerBlock, type SpacerBlock, type FooterBlock, makeBlock, makeLogo,
 } from '@/lib/blocks';
-import { saveTemplate } from '../../actions';
+import { saveTemplate, uploadEmailImage } from '../../actions';
 import { cn } from '@/lib/utils';
 
 /** Palette item. Either `type` (uses makeBlock) or `make` (custom preset like Logo). */
@@ -291,13 +291,21 @@ function BlockPreview({ block }: { block: Block }) {
           <p style={{ margin: 0, color: block.color, fontFamily: 'Inter, Arial, sans-serif', fontSize: 15, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{block.text}</p>
         </div>
       );
-    case 'image':
+    case 'image': {
+      // Mirror compile-template.ts: real email clients ignore CSS text-align
+      // on block-level images, so we set the margin explicitly. Both the
+      // wrapping td's text-align AND the img's margin must follow `align`
+      // for the editor preview to match the sent email exactly.
+      const align = block.align ?? 'center';
+      const margin =
+        align === 'left' ? '0 auto 0 0' : align === 'right' ? '0 0 0 auto' : '0 auto';
       // eslint-disable-next-line @next/next/no-img-element
       return (
-        <div style={{ padding: '8px 24px', textAlign: 'center' }}>
-          <img src={block.src} alt={block.alt} width={block.width} style={{ display: 'block', maxWidth: '100%', height: 'auto', margin: '0 auto' }} />
+        <div style={{ padding: '8px 24px', textAlign: align }}>
+          <img src={block.src} alt={block.alt} width={block.width} style={{ display: 'block', maxWidth: '100%', height: 'auto', margin }} />
         </div>
       );
+    }
     case 'button':
       return (
         <div style={{ padding: '16px 24px', textAlign: block.align }}>
@@ -359,7 +367,10 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
       return (
         <div className="space-y-3">
           <Section title="Image" />
-          <Field label="Image URL"><input value={block.src} onChange={(e) => onChange({ src: e.target.value } as Partial<ImageBlock>)} className={inputCls} /></Field>
+          <ImageUploader
+            value={block.src}
+            onChange={(v) => onChange({ src: v } as Partial<ImageBlock>)}
+          />
           <Field label="Alt text"><input value={block.alt} onChange={(e) => onChange({ alt: e.target.value } as Partial<ImageBlock>)} className={inputCls} /></Field>
           <Field label="Width (px)"><input type="number" min={50} max={1200} value={block.width} onChange={(e) => onChange({ width: parseInt(e.target.value, 10) || 600 } as Partial<ImageBlock>)} className={inputCls} /></Field>
           <AlignField value={block.align ?? 'center'} onChange={(v) => onChange({ align: v } as Partial<ImageBlock>)} />
@@ -422,6 +433,112 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Section({ title }: { title: string }) {
   return <h2 className="text-sm font-semibold border-b border-zinc-200 pb-2">{title}</h2>;
 }
+/**
+ * Image picker for image-block properties: shows a thumbnail of the current
+ * image, an "Upload" button that opens the OS file picker (no URL knowledge
+ * needed), and a small disclosure for pasting a URL when the user genuinely
+ * wants one (e.g. an external CDN). Uploads go through the uploadEmailImage
+ * server action and the resulting public URL is set as block.src.
+ */
+function ImageUploader({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showUrl, setShowUrl] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  async function handleFile(file: File) {
+    setError(null);
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.set('file', file);
+      const res = await uploadEmailImage(fd);
+      if (!res.ok || !res.url) {
+        setError(res.error ?? 'Upload falhou');
+      } else {
+        onChange(res.url);
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium text-zinc-600">Imagem</div>
+
+      {/* Preview */}
+      <div className="aspect-[4/3] rounded-md border border-zinc-200 bg-zinc-50 grid place-items-center overflow-hidden">
+        {value ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={value} alt="Preview" className="max-w-full max-h-full object-contain" />
+        ) : (
+          <div className="text-center text-zinc-400 text-xs px-3">
+            <ImageIcon size={28} className="mx-auto mb-1" />
+            Nenhuma imagem
+          </div>
+        )}
+      </div>
+
+      {/* Upload action row */}
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-3 py-2 text-xs hover:bg-brl-yellow-hover disabled:opacity-50"
+        >
+          <Upload size={12} />
+          {uploading ? 'Enviando…' : value ? 'Trocar imagem' : 'Enviar imagem'}
+        </button>
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            disabled={uploading}
+            className="rounded-md border border-zinc-300 bg-white px-2 py-2 text-xs hover:bg-zinc-50 disabled:opacity-50"
+            title="Remover imagem"
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFile(f);
+          e.currentTarget.value = ''; // allow re-uploading the same filename
+        }}
+      />
+
+      {error && <p className="text-[11px] text-brl-error">{error}</p>}
+
+      {/* URL fallback (collapsed by default — most users never need this) */}
+      <button
+        type="button"
+        onClick={() => setShowUrl((v) => !v)}
+        className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+      >
+        <LinkIcon size={10} />
+        {showUrl ? 'Ocultar URL' : 'Usar URL externa'}
+      </button>
+      {showUrl && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://…"
+          className={inputCls}
+        />
+      )}
+      <p className="text-[10px] text-zinc-400">PNG, JPG, SVG, WebP ou GIF · até 10MB</p>
+    </div>
+  );
+}
+
 function AlignField({ value, onChange }: { value: 'left' | 'center' | 'right'; onChange: (v: 'left' | 'center' | 'right') => void }) {
   return (
     <Field label="Alignment">
