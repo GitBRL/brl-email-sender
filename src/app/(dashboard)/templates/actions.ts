@@ -7,11 +7,13 @@ import { requireRole } from '@/lib/auth';
 import { compileTemplate } from '@/lib/compile-template';
 import { DEFAULT_DOCUMENT, uid, type TemplateDocument, type Block, type ButtonBlock } from '@/lib/blocks';
 import { findStarter } from '@/lib/starter-templates';
+import { defaultDocForKit, type BrandKit } from '@/lib/brand-kits';
 
 export type ActionState = { ok: boolean; error?: string; id?: string };
 
-const NameOnly = z.object({
+const CreateTemplateInput = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
+  brand_kit_id: z.string().uuid().optional().or(z.literal('')).transform((v) => v || null),
 });
 
 function fd(form: FormData) {
@@ -22,17 +24,31 @@ function fd(form: FormData) {
 
 export async function createTemplate(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const profile = await requireRole('editor');
-  const parsed = NameOnly.safeParse(fd(formData));
+  const parsed = CreateTemplateInput.safeParse(fd(formData));
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
 
   const supabase = createServiceClient();
+
+  // If a brand kit is selected, pre-populate the document with kit-themed blocks
+  // (header / hero / body / CTA / divider / footer). Otherwise fall back to empty.
+  let doc = DEFAULT_DOCUMENT;
+  if (parsed.data.brand_kit_id) {
+    const { data: kit } = await supabase
+      .from('brand_kits')
+      .select('*')
+      .eq('id', parsed.data.brand_kit_id)
+      .maybeSingle<BrandKit>();
+    if (kit) doc = defaultDocForKit(kit);
+  }
+
   const { data, error } = await supabase
     .from('templates')
     .insert({
       name: parsed.data.name,
-      json_content: DEFAULT_DOCUMENT,
-      html_content: compileTemplate(DEFAULT_DOCUMENT),
+      json_content: doc,
+      html_content: compileTemplate(doc),
       created_by: profile.id,
+      brand_kit_id: parsed.data.brand_kit_id,
     })
     .select('id')
     .single();

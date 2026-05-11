@@ -1,7 +1,11 @@
 'use client';
 
-import { useState, useTransition, useCallback } from 'react';
+import { useState, useTransition, useCallback, createContext, useContext } from 'react';
 import { useRouter } from 'next/navigation';
+import type { BrandKit } from '@/lib/brand-kits';
+import { kitPalette } from '@/lib/brand-kits';
+
+const BrandKitContext = createContext<BrandKit | null>(null);
 import {
   Type, Heading1, Image as ImageIcon, MousePointerClick, Minus, Square, Mail, Trash2, ChevronUp, ChevronDown, Eye, Save, GripVertical,
   Building2,
@@ -36,6 +40,7 @@ export function TemplateEditor({
   initialDoc,
   initialIsStarter,
   canMarkStarter,
+  brandKit,
 }: {
   templateId: string;
   initialName: string;
@@ -43,6 +48,8 @@ export function TemplateEditor({
   initialIsStarter: boolean;
   /** Only admins can promote a template to the shared starter gallery. */
   canMarkStarter: boolean;
+  /** Brand kit linked to this template (themes color swatches + shows badge in toolbar). */
+  brandKit: BrandKit | null;
 }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
@@ -116,9 +123,40 @@ export function TemplateEditor({
   }
 
   return (
+    <BrandKitContext.Provider value={brandKit}>
     <div className="h-full grid grid-cols-[200px_1fr_300px]">
       {/* Palette */}
       <aside className="border-r border-zinc-200 bg-white p-3 overflow-y-auto">
+        {brandKit && (
+          <div className="mb-3 rounded-md border border-zinc-200 overflow-hidden">
+            <div
+              className="h-6 flex items-center justify-center px-2"
+              style={{ background: brandKit.color_header_bg }}
+            >
+              <span
+                className="text-[10px] font-bold uppercase tracking-wide truncate"
+                style={{
+                  color:
+                    brandKit.color_header_bg.toLowerCase() === '#ffffff'
+                      ? brandKit.color_primary
+                      : brandKit.color_cta_text,
+                }}
+              >
+                {brandKit.name}
+              </span>
+            </div>
+            <div className="p-1.5 flex items-center gap-1 bg-white">
+              {kitPalette(brandKit).map((c) => (
+                <span
+                  key={c.label}
+                  className="inline-block w-4 h-4 rounded-full border border-black/10"
+                  style={{ background: c.value }}
+                  title={`${c.label}: ${c.value}`}
+                />
+              ))}
+            </div>
+          </div>
+        )}
         <h2 className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mb-2 px-1">Blocks</h2>
         <div className="space-y-1">
           {PALETTE.map((p) => (
@@ -233,6 +271,7 @@ export function TemplateEditor({
         )}
       </aside>
     </div>
+    </BrandKitContext.Provider>
   );
 }
 
@@ -405,11 +444,33 @@ function AlignField({ value, onChange }: { value: 'left' | 'center' | 'right'; o
   );
 }
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const kit = useContext(BrandKitContext);
+  const swatches = kit ? kitPalette(kit) : [];
   return (
     <Field label={label}>
-      <div className="flex items-center gap-2">
-        <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="w-9 h-9 rounded border border-zinc-300 cursor-pointer" />
-        <input value={value} onChange={(e) => onChange(e.target.value)} className={inputCls} />
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="w-9 h-9 rounded border border-zinc-300 cursor-pointer" />
+          <input value={value} onChange={(e) => onChange(e.target.value)} className={inputCls} />
+        </div>
+        {swatches.length > 0 && (
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <span className="text-[10px] text-zinc-500 mr-0.5">Kit:</span>
+            {swatches.map((s) => (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => onChange(s.value)}
+                title={`${s.label}: ${s.value}`}
+                className={cn(
+                  'w-5 h-5 rounded-full border border-black/15 hover:scale-110 transition shrink-0',
+                  value.toLowerCase() === s.value.toLowerCase() && 'ring-2 ring-brl-yellow ring-offset-1',
+                )}
+                style={{ background: s.value }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </Field>
   );

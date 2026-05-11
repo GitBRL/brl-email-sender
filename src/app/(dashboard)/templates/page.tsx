@@ -3,6 +3,7 @@ import { FileText, Sparkles, Star } from 'lucide-react';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireProfile } from '@/lib/auth';
 import { STARTER_TEMPLATES } from '@/lib/starter-templates';
+import type { BrandKit } from '@/lib/brand-kits';
 import { NewTemplateButton } from './_new-button';
 import { TemplateRowActions } from './_row-actions';
 import { UseStarterButton } from './_use-starter-button';
@@ -18,11 +19,15 @@ type TemplateRow = {
 export default async function TemplatesPage() {
   const profile = await requireProfile();
   const supabase = createServiceClient();
-  const { data } = await supabase
-    .from('templates')
-    .select('id, name, is_starter, created_at, updated_at')
-    .order('updated_at', { ascending: false });
+  const [{ data }, { data: kitsData }] = await Promise.all([
+    supabase
+      .from('templates')
+      .select('id, name, is_starter, created_at, updated_at')
+      .order('updated_at', { ascending: false }),
+    supabase.from('brand_kits').select('*').order('is_custom').order('name'),
+  ]);
   const all = (data ?? []) as TemplateRow[];
+  const kits = (kitsData ?? []) as BrandKit[];
   const teamStarters = all.filter((t) => t.is_starter);
   const userTemplates = all.filter((t) => !t.is_starter);
 
@@ -38,7 +43,7 @@ export default async function TemplatesPage() {
             Designs reutilizáveis montados no editor de blocos.
           </p>
         </div>
-        {canEdit && <NewTemplateButton />}
+        {canEdit && <NewTemplateButton kits={kits} />}
       </header>
 
       {/* Built-in starter gallery */}

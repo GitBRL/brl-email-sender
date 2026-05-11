@@ -2,35 +2,40 @@
 
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, FileText, Users, Send, Settings } from 'lucide-react';
+import { Check, FileText, Users, Send, Settings, Palette } from 'lucide-react';
 import { createCampaign, updateCampaign, previewRecipients, sendCampaign } from '../actions';
 import type { ContactTag } from '@/types';
 import { cn } from '@/lib/utils';
+import type { BrandKit } from '@/lib/brand-kits';
+import { BrandKitPicker } from '@/components/brand-kit-picker';
 
-type Template = { id: string; name: string; updated_at: string };
+type Template = { id: string; name: string; updated_at: string; brand_kit_id: string | null };
 type List = { id: string; name: string; contact_count: number };
 
-const STEPS = ['Settings', 'Template', 'Audience', 'Review'] as const;
+const STEPS = ['Kit', 'Settings', 'Template', 'Audience', 'Review'] as const;
 type Step = (typeof STEPS)[number];
 
 export function Wizard({
   templates,
   lists,
+  kits,
   defaultFromName,
   defaultFromEmail,
 }: {
   templates: Template[];
   lists: List[];
+  kits: BrandKit[];
   defaultFromName: string;
   defaultFromEmail: string;
 }) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>('Settings');
+  const [step, setStep] = useState<Step>('Kit');
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   // Form state
   const [campaignId, setCampaignId] = useState<string | null>(null);
+  const [brandKitId, setBrandKitId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
   const [fromName, setFromName] = useState(defaultFromName);
@@ -39,6 +44,12 @@ export function Wizard({
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [listIds, setListIds] = useState<string[]>([]);
   const [filterTag, setFilterTag] = useState<ContactTag | ''>('');
+
+  // Filter the templates shown in step 'Template' to those matching the
+  // selected brand kit (plus templates with no kit, since they're brand-agnostic).
+  const eligibleTemplates = brandKitId
+    ? templates.filter((t) => !t.brand_kit_id || t.brand_kit_id === brandKitId)
+    : templates;
 
   // Recipient preview
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
@@ -65,10 +76,12 @@ export function Wizard({
     fd.set('from_name', fromName);
     fd.set('from_email', fromEmail);
     fd.set('reply_to', replyTo);
+    if (brandKitId) fd.set('brand_kit_id', brandKitId);
     start(async () => {
       if (campaignId) {
         const res = await updateCampaign(campaignId, {
           name, subject, from_name: fromName, from_email: fromEmail, reply_to: replyTo || null,
+          brand_kit_id: brandKitId,
         });
         if (!res.ok) return setError(res.error ?? 'Failed to save');
       } else {
@@ -114,11 +127,41 @@ export function Wizard({
     });
   }
 
+  function gotoSettings() {
+    setError(null);
+    if (!brandKitId) return setError('Selecione um produto antes de continuar.');
+    setStep('Settings');
+  }
+
   return (
     <div>
       <Stepper current={step} />
 
       <div className="bg-white rounded-lg border border-zinc-200 p-6">
+        {step === 'Kit' && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold">Selecionar produto</h2>
+              <p className="text-sm text-zinc-500 mt-0.5">
+                A identidade visual (cores, logo) é aplicada automaticamente no editor.
+              </p>
+            </div>
+            <BrandKitPicker kits={kits} selectedId={brandKitId} onSelect={setBrandKitId} />
+            {error && <ErrorBox>{error}</ErrorBox>}
+            <Footer>
+              <span />
+              <button
+                type="button"
+                disabled={!brandKitId}
+                onClick={gotoSettings}
+                className={primaryBtn}
+              >
+                Continuar →
+              </button>
+            </Footer>
+          </div>
+        )}
+
         {step === 'Settings' && (
           <form onSubmit={gotoTemplate} className="space-y-4">
             <Field label="Campaign name (internal)">
@@ -140,6 +183,7 @@ export function Wizard({
             </Field>
             {error && <ErrorBox>{error}</ErrorBox>}
             <Footer>
+              <button type="button" onClick={() => setStep('Kit')} className={secondaryBtn}>← Voltar</button>
               <button type="submit" disabled={pending} className={primaryBtn}>{pending ? 'Saving…' : 'Continue →'}</button>
             </Footer>
           </form>
@@ -147,11 +191,14 @@ export function Wizard({
 
         {step === 'Template' && (
           <div className="space-y-4">
-            {templates.length === 0 ? (
-              <p className="text-sm text-zinc-500">No templates yet. <a href="/templates" className="underline">Create one →</a></p>
+            {eligibleTemplates.length === 0 ? (
+              <p className="text-sm text-zinc-500">
+                Nenhum template compatível com o kit selecionado.{' '}
+                <a href="/templates" className="underline">Criar template →</a>
+              </p>
             ) : (
               <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {templates.map((t) => (
+                {eligibleTemplates.map((t) => (
                   <li key={t.id}>
                     <button
                       type="button"
@@ -266,7 +313,7 @@ export function Wizard({
 
 function Stepper({ current }: { current: Step }) {
   const idx = STEPS.indexOf(current);
-  const ICONS = [Settings, FileText, Users, Send];
+  const ICONS = [Palette, Settings, FileText, Users, Send];
   return (
     <ol className="flex items-center mb-6 text-xs">
       {STEPS.map((s, i) => {

@@ -16,6 +16,7 @@ const Settings = z.object({
   from_name: z.string().trim().min(1).max(120),
   from_email: z.string().email(),
   reply_to: z.string().email().optional().or(z.literal('')).transform((v) => v || null),
+  brand_kit_id: z.string().uuid().optional().or(z.literal('')).transform((v) => v || null),
 });
 
 function fd(form: FormData) {
@@ -51,6 +52,7 @@ export async function updateCampaign(
     template_id: string | null;
     list_ids: string[];
     filter_tag: ContactTag | null;
+    brand_kit_id: string | null;
   }>,
 ): Promise<ActionState> {
   await requireRole('editor');
