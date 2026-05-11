@@ -6,17 +6,23 @@ import Papa from 'papaparse';
 import { Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { bulkImportContacts } from '../actions';
 
+type StandardKey = 'email' | 'name' | 'phone' | 'company' | 'tag' | 'status';
+type StandardField = {
+  key: StandardKey;
+  label: string;
+  required: boolean;
+  hint?: string;
+};
+
 /** Standard fields. The Email field is required to import any row. */
-const STANDARD_FIELDS = [
+const STANDARD_FIELDS: readonly StandardField[] = [
   { key: 'email', label: 'Email', required: true, hint: 'unique identifier' },
   { key: 'name', label: 'Name', required: false },
   { key: 'phone', label: 'Phone', required: false },
   { key: 'company', label: 'Company', required: false },
   { key: 'tag', label: 'Tag', required: false, hint: 'hot / warm / cold' },
   { key: 'status', label: 'Status', required: false, hint: 'subscribed / unsubscribed / bounced' },
-] as const;
-
-type StandardKey = (typeof STANDARD_FIELDS)[number]['key'];
+];
 
 /**
  * Aliases for auto-detection. Matches lowercased + diacritic-stripped CSV
