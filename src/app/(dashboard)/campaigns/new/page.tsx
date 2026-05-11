@@ -3,6 +3,7 @@ import { ChevronLeft } from 'lucide-react';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/auth';
 import { FROM_EMAIL, FROM_NAME } from '@/lib/resend';
+import { STARTER_TEMPLATES } from '@/lib/starter-templates';
 import { Wizard } from './wizard';
 import type { BrandKit } from '@/lib/brand-kits';
 
@@ -26,6 +27,12 @@ export default async function NewCampaignPage() {
         templates={(templates ?? []) as Array<{ id: string; name: string; updated_at: string; brand_kit_id: string | null }>}
         lists={(lists ?? []) as Array<{ id: string; name: string; contact_count: number }>}
         kits={(kits ?? []) as BrandKit[]}
+        starters={STARTER_TEMPLATES.map((s) => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          category: s.category,
+        }))}
         defaultFromName={FROM_NAME}
         defaultFromEmail={FROM_EMAIL}
       />

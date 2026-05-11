@@ -2,8 +2,8 @@
 
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, FileText, Users, Send, Settings, Palette } from 'lucide-react';
-import { createCampaign, updateCampaign, previewRecipients, sendCampaign } from '../actions';
+import { Check, FileText, Users, Send, Settings, Palette, Sparkles, Megaphone, Tag, Rocket } from 'lucide-react';
+import { createCampaign, updateCampaign, previewRecipients, sendCampaign, useStarterForCampaign } from '../actions';
 import type { ContactTag } from '@/types';
 import { cn } from '@/lib/utils';
 import type { BrandKit } from '@/lib/brand-kits';
@@ -11,20 +11,31 @@ import { BrandKitPicker } from '@/components/brand-kit-picker';
 
 type Template = { id: string; name: string; updated_at: string; brand_kit_id: string | null };
 type List = { id: string; name: string; contact_count: number };
+type StarterMeta = { id: string; name: string; description: string; category: string };
 
 const STEPS = ['Kit', 'Settings', 'Template', 'Audience', 'Review'] as const;
 type Step = (typeof STEPS)[number];
+
+/** Match a starter to a Lucide icon based on its built-in id suffix. */
+function starterIcon(id: string) {
+  if (id.includes('announcement') || id.includes('message')) return Megaphone;
+  if (id.includes('promo')) return Tag;
+  if (id.includes('launch')) return Rocket;
+  return Sparkles;
+}
 
 export function Wizard({
   templates,
   lists,
   kits,
+  starters,
   defaultFromName,
   defaultFromEmail,
 }: {
   templates: Template[];
   lists: List[];
   kits: BrandKit[];
+  starters: StarterMeta[];
   defaultFromName: string;
   defaultFromEmail: string;
 }) {
@@ -42,6 +53,7 @@ export function Wizard({
   const [fromEmail, setFromEmail] = useState(defaultFromEmail);
   const [replyTo, setReplyTo] = useState('');
   const [templateId, setTemplateId] = useState<string | null>(null);
+  const [starterId, setStarterId] = useState<string | null>(null);
   const [listIds, setListIds] = useState<string[]>([]);
   const [filterTag, setFilterTag] = useState<ContactTag | ''>('');
 
@@ -50,6 +62,7 @@ export function Wizard({
   const eligibleTemplates = brandKitId
     ? templates.filter((t) => !t.brand_kit_id || t.brand_kit_id === brandKitId)
     : templates;
+  const selectedKit = brandKitId ? kits.find((k) => k.id === brandKitId) ?? null : null;
 
   // Recipient preview
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
@@ -95,10 +108,17 @@ export function Wizard({
 
   function gotoAudience() {
     setError(null);
-    if (!templateId) return setError('Pick a template first.');
+    if (!templateId && !starterId) return setError('Escolha um modelo ou template antes de continuar.');
     start(async () => {
-      const res = await updateCampaign(campaignId!, { template_id: templateId });
-      if (!res.ok) return setError(res.error ?? 'Failed to save');
+      // Two paths: a starter is cloned + themed + linked in one server action;
+      // an existing template is linked directly via updateCampaign.
+      if (starterId) {
+        const res = await useStarterForCampaign(campaignId!, starterId);
+        if (!res.ok) return setError(res.error ?? 'Failed to apply starter');
+      } else {
+        const res = await updateCampaign(campaignId!, { template_id: templateId });
+        if (!res.ok) return setError(res.error ?? 'Failed to save');
+      }
       setStep('Audience');
     });
   }
@@ -190,38 +210,117 @@ export function Wizard({
         )}
 
         {step === 'Template' && (
-          <div className="space-y-4">
-            {eligibleTemplates.length === 0 ? (
-              <p className="text-sm text-zinc-500">
-                Nenhum template compatível com o kit selecionado.{' '}
-                <a href="/templates" className="underline">Criar template →</a>
-              </p>
-            ) : (
-              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {eligibleTemplates.map((t) => (
-                  <li key={t.id}>
-                    <button
-                      type="button"
-                      onClick={() => setTemplateId(t.id)}
-                      className={cn(
-                        'w-full text-left rounded-lg border-2 p-4 hover:border-brl-yellow transition flex gap-3 items-center',
-                        templateId === t.id ? 'border-brl-yellow bg-brl-yellow/10' : 'border-zinc-200 bg-white',
-                      )}
+          <div className="space-y-5">
+            {/* Starter templates — auto-themed with the chosen kit on selection */}
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-1.5">
+                <Sparkles size={12} className="text-brl-yellow" />
+                Modelos prontos
+                {selectedKit && (
+                  <span className="ml-1 inline-flex items-center gap-1 text-[10px] font-medium normal-case tracking-normal text-zinc-600">
+                    pré-configurados para
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5"
+                      style={{
+                        background: selectedKit.color_header_bg,
+                        color:
+                          selectedKit.color_header_bg.toLowerCase() === '#ffffff'
+                            ? selectedKit.color_primary
+                            : selectedKit.color_cta_text,
+                      }}
                     >
-                      <FileText size={18} className="text-zinc-400 shrink-0" />
-                      <div className="min-w-0">
-                        <div className="font-medium truncate">{t.name}</div>
-                        <div className="text-xs text-zinc-500">Updated {new Date(t.updated_at).toLocaleDateString('pt-BR')}</div>
-                      </div>
-                    </button>
-                  </li>
-                ))}
+                      <span
+                        className="inline-block w-1.5 h-1.5 rounded-full"
+                        style={{ background: selectedKit.color_primary }}
+                      />
+                      {selectedKit.name}
+                    </span>
+                  </span>
+                )}
+              </h3>
+              <ul className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {starters.map((s) => {
+                  const Icon = starterIcon(s.id);
+                  const isSelected = starterId === s.id;
+                  return (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStarterId(s.id);
+                          setTemplateId(null); // mutually exclusive with custom template
+                        }}
+                        className={cn(
+                          'w-full text-left rounded-lg border-2 overflow-hidden transition bg-white',
+                          isSelected ? 'border-brl-yellow shadow-md' : 'border-zinc-200 hover:border-zinc-300',
+                        )}
+                      >
+                        {/* Themed mini-preview */}
+                        <StarterPreview kit={selectedKit} variant={s.id} />
+                        <div className="p-3">
+                          <div className="flex items-center gap-2">
+                            <Icon size={14} className="text-zinc-500 shrink-0" />
+                            <div className="font-semibold text-sm truncate">{s.name}</div>
+                            {isSelected && (
+                              <Check size={14} className="ml-auto text-brl-yellow shrink-0" strokeWidth={3} />
+                            )}
+                          </div>
+                          <p className="text-[11px] text-zinc-500 mt-1 line-clamp-2">{s.description}</p>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
+            </div>
+
+            {/* User templates (only shown if any exist) */}
+            {eligibleTemplates.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-1.5">
+                  <FileText size={12} />
+                  Seus templates salvos
+                </h3>
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {eligibleTemplates.map((t) => (
+                    <li key={t.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTemplateId(t.id);
+                          setStarterId(null);
+                        }}
+                        className={cn(
+                          'w-full text-left rounded-lg border-2 p-4 hover:border-brl-yellow transition flex gap-3 items-center',
+                          templateId === t.id ? 'border-brl-yellow bg-brl-yellow/10' : 'border-zinc-200 bg-white',
+                        )}
+                      >
+                        <FileText size={18} className="text-zinc-400 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate">{t.name}</div>
+                          <div className="text-xs text-zinc-500">
+                            Atualizado em {new Date(t.updated_at).toLocaleDateString('pt-BR')}
+                          </div>
+                        </div>
+                        {templateId === t.id && <Check size={14} className="text-brl-yellow shrink-0" strokeWidth={3} />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
+
             {error && <ErrorBox>{error}</ErrorBox>}
             <Footer>
-              <button type="button" onClick={() => setStep('Settings')} className={secondaryBtn}>← Back</button>
-              <button type="button" disabled={pending || !templateId} onClick={gotoAudience} className={primaryBtn}>{pending ? 'Saving…' : 'Continue →'}</button>
+              <button type="button" onClick={() => setStep('Settings')} className={secondaryBtn}>← Voltar</button>
+              <button
+                type="button"
+                disabled={pending || (!templateId && !starterId)}
+                onClick={gotoAudience}
+                className={primaryBtn}
+              >
+                {pending ? 'Salvando…' : 'Continuar →'}
+              </button>
             </Footer>
           </div>
         )}
@@ -288,7 +387,16 @@ export function Wizard({
               <Row label="Subject" value={subject} />
               <Row label="From" value={`${fromName} <${fromEmail}>`} />
               {replyTo && <Row label="Reply-to" value={replyTo} />}
-              <Row label="Template" value={templates.find((t) => t.id === templateId)?.name ?? '—'} />
+              <Row
+                label="Template"
+                value={
+                  templateId
+                    ? templates.find((t) => t.id === templateId)?.name ?? '—'
+                    : starterId
+                      ? `${starters.find((s) => s.id === starterId)?.name ?? 'Modelo'} (auto-temado)`
+                      : '—'
+                }
+              />
               <Row label="Lists" value={listIds.length === 0 ? 'all' : `${listIds.length} selected`} />
               <Row label="Tag filter" value={filterTag || 'all'} />
             </dl>
@@ -368,6 +476,98 @@ function Footer({ children }: { children: React.ReactNode }) {
 }
 function ErrorBox({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-brl-error bg-red-50 border border-red-100 rounded px-3 py-2">{children}</p>;
+}
+
+/**
+ * Stylised mini preview of a starter template, themed with the currently
+ * selected brand kit. Each variant draws a tiny stand-in for the actual
+ * template's structure (announcement / promo / launch) so the user can pick
+ * by visual rhythm rather than reading three card titles.
+ */
+function StarterPreview({ kit, variant }: { kit: BrandKit | null; variant: string }) {
+  const colors = {
+    headerBg: kit?.color_header_bg ?? '#2b2b2b',
+    bg: kit?.color_background ?? '#ffffff',
+    text: kit?.color_text ?? '#2b2b2b',
+    ctaBg: kit?.color_cta_bg ?? '#ffcd01',
+    ctaText: kit?.color_cta_text ?? '#2b2b2b',
+    primary: kit?.color_primary ?? '#ffcd01',
+  };
+
+  // ---- Promo variant: big top banner + centered headline + CTA ----
+  if (variant.includes('promo')) {
+    return (
+      <div className="aspect-[3/2]" style={{ background: colors.bg }}>
+        <div className="h-1/3 grid place-items-center" style={{ background: colors.primary }}>
+          <span className="text-[8px] font-bold text-white/90 tracking-wider">OFERTA</span>
+        </div>
+        <div className="px-3 py-2 space-y-1">
+          <div className="h-1.5 rounded w-3/4 mx-auto" style={{ background: colors.text, opacity: 0.75 }} />
+          <div className="h-1 rounded w-1/2 mx-auto" style={{ background: colors.text, opacity: 0.35 }} />
+          <div className="h-1 rounded w-2/3 mx-auto" style={{ background: colors.text, opacity: 0.35 }} />
+          <div className="pt-1 grid place-items-center">
+            <span
+              className="inline-block rounded text-[7px] font-bold px-2 py-1"
+              style={{ background: colors.ctaBg, color: colors.ctaText }}
+            >
+              GARANTIR
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Launch variant: header bar + tagline + image placeholder + 3 features + CTA ----
+  if (variant.includes('launch')) {
+    return (
+      <div className="aspect-[3/2]" style={{ background: colors.bg }}>
+        <div className="px-3 pt-2 space-y-1">
+          <div className="h-1 rounded w-1/3 mx-auto" style={{ background: colors.text, opacity: 0.3 }} />
+          <div className="h-2 rounded w-2/3 mx-auto" style={{ background: colors.text, opacity: 0.8 }} />
+        </div>
+        <div className="mx-3 mt-1.5 h-8 rounded grid place-items-center" style={{ background: colors.primary, opacity: 0.85 }}>
+          <span className="text-[7px] text-white/80 font-medium">imagem</span>
+        </div>
+        <div className="px-3 py-1 space-y-0.5">
+          <div className="h-1 rounded w-2/3" style={{ background: colors.text, opacity: 0.55 }} />
+          <div className="h-1 rounded w-1/2" style={{ background: colors.text, opacity: 0.55 }} />
+          <div className="h-1 rounded w-3/5" style={{ background: colors.text, opacity: 0.55 }} />
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Default (announcement) variant: logo + headline + 2 paragraphs + CTA ----
+  return (
+    <div className="aspect-[3/2]" style={{ background: colors.bg }}>
+      <div className="h-7 grid place-items-center" style={{ background: colors.headerBg }}>
+        {kit?.logo_url ? (
+          <img src={kit.logo_url} alt="" className="max-h-4 max-w-[60%] object-contain" />
+        ) : (
+          <span
+            className="text-[7px] font-bold tracking-tight"
+            style={{ color: colors.headerBg.toLowerCase() === '#ffffff' ? colors.primary : colors.ctaText }}
+          >
+            {kit?.name?.toUpperCase() ?? 'BRAND'}
+          </span>
+        )}
+      </div>
+      <div className="px-3 py-2 space-y-1">
+        <div className="h-1.5 rounded w-3/4" style={{ background: colors.text, opacity: 0.8 }} />
+        <div className="h-1 rounded w-full" style={{ background: colors.text, opacity: 0.35 }} />
+        <div className="h-1 rounded w-5/6" style={{ background: colors.text, opacity: 0.35 }} />
+        <div className="pt-1">
+          <span
+            className="inline-block rounded text-[7px] font-bold px-2 py-1"
+            style={{ background: colors.ctaBg, color: colors.ctaText }}
+          >
+            Saiba mais
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const inputCls = 'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-brl-dark';

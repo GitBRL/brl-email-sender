@@ -137,6 +137,67 @@ export function defaultDocForKit(kit: BrandKit): TemplateDocument {
   };
 }
 
+/**
+ * Re-theme a set of starter-template blocks with the colours of a brand kit.
+ *
+ * The starter templates (`src/lib/starter-templates.ts`) are seeded with the
+ * BRL palette (yellow #ffcd01, orange #f47216, dark #2b2b2b). When a user
+ * picks a starter for a campaign whose kit is e.g. Salus, we substitute
+ * those brand hexes with the kit's tokens, while leaving functional greys
+ * (#666666, #a1a1aa, #e5e5e5) alone.
+ *
+ * Substitution map:
+ *   button.background — yellow → cta_bg, orange → primary, dark → secondary
+ *   button.color      — always replaced with kit.color_cta_text (the bg
+ *                       changed, so its contrast partner must follow)
+ *   header/text.color — dark → text, orange → primary, yellow → cta_bg
+ *   image.src         — only the BRL placeholder logo (URL contains
+ *                       'BRL+Educa') swaps to kit.logo_url when available
+ *
+ * Block ids are NOT touched here — that's the caller's job (they regenerate
+ * uuids so click attribution stays per-template).
+ */
+export function applyKitToBlocks(blocks: Block[], kit: BrandKit): Block[] {
+  const isYellow = (c?: string) => !!c && c.toLowerCase() === '#ffcd01';
+  const isOrange = (c?: string) => !!c && c.toLowerCase() === '#f47216';
+  const isDark = (c?: string) => !!c && c.toLowerCase() === '#2b2b2b';
+  const isWhite = (c?: string) => !!c && c.toLowerCase() === '#ffffff';
+
+  return blocks.map<Block>((b) => {
+    if (b.type === 'header') {
+      let color = b.color;
+      if (isDark(color)) color = kit.color_text;
+      else if (isOrange(color)) color = kit.color_primary;
+      else if (isYellow(color)) color = kit.color_cta_bg;
+      return { ...b, color };
+    }
+    if (b.type === 'text') {
+      let color = b.color;
+      if (isDark(color)) color = kit.color_text;
+      else if (isOrange(color)) color = kit.color_primary;
+      else if (isYellow(color)) color = kit.color_cta_bg;
+      return { ...b, color };
+    }
+    if (b.type === 'button') {
+      let background = b.background;
+      if (isYellow(background)) background = kit.color_cta_bg;
+      else if (isOrange(background)) background = kit.color_primary;
+      else if (isDark(background)) background = kit.color_secondary;
+      // button text always follows the new bg's contrast partner
+      const color =
+        isDark(b.color) || isWhite(b.color)
+          ? kit.color_cta_text
+          : b.color;
+      return { ...b, background, color };
+    }
+    if (b.type === 'image') {
+      const src = b.src.includes('BRL+Educa') && kit.logo_url ? kit.logo_url : b.src;
+      return { ...b, src };
+    }
+    return b;
+  });
+}
+
 /** Quick perceptual-luma check to pick a legible heading color against a bg. */
 export function contrastingTextOn(bgHex: string): string {
   const hex = bgHex.replace('#', '');

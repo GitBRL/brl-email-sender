@@ -7,6 +7,10 @@ import { requireRole } from '@/lib/auth';
 import { resend, FROM_EMAIL, FROM_NAME } from '@/lib/resend';
 import { prepareCampaignHtml, personalize, personalizeSubject } from '@/lib/tracking';
 import type { ContactTag } from '@/types';
+import { applyKitToBlocks, type BrandKit } from '@/lib/brand-kits';
+import { findStarter } from '@/lib/starter-templates';
+import { compileTemplate } from '@/lib/compile-template';
+import { uid, type Block, type ButtonBlock, type TemplateDocument } from '@/lib/blocks';
 
 export type ActionState = { ok: boolean; error?: string; id?: string; sent?: number; failed?: number };
 
@@ -71,6 +75,101 @@ export async function deleteCampaign(id: string): Promise<ActionState> {
   if (error) return { ok: false, error: error.message };
   revalidatePath('/campaigns');
   return { ok: true };
+}
+
+/**
+ * Wizard-only convenience action: take a starter template id (`builtin:*` or
+ * a DB template flagged is_starter), clone it, re-theme the blocks with the
+ * campaign's selected brand kit, persist it as a new template row, and link
+ * the resulting template to the campaign in one shot.
+ *
+ * Returns the new template id so the wizard can advance directly to the
+ * next step without needing a separate updateCampaign call.
+ */
+export async function useStarterForCampaign(
+  campaignId: string,
+  starterId: string,
+): Promise<ActionState> {
+  const profile = await requireRole('editor');
+  const supabase = createServiceClient();
+
+  // Load the campaign so we can find its kit + use its name for labelling
+  const { data: campaign, error: campErr } = await supabase
+    .from('campaigns')
+    .select('id, name, brand_kit_id')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (campErr || !campaign) return { ok: false, error: campErr?.message ?? 'Campaign not found.' };
+
+  // Pull the kit (may be null on legacy campaigns; in that case we keep the
+  // starter's original BRL palette as a safe fallback)
+  let kit: BrandKit | null = null;
+  if (campaign.brand_kit_id) {
+    const { data } = await supabase
+      .from('brand_kits')
+      .select('*')
+      .eq('id', campaign.brand_kit_id)
+      .maybeSingle<BrandKit>();
+    kit = data;
+  }
+
+  // Resolve the starter document
+  let sourceName: string;
+  let sourceDoc: TemplateDocument;
+  if (starterId.startsWith('builtin:')) {
+    const starter = findStarter(starterId);
+    if (!starter) return { ok: false, error: 'Starter template not found.' };
+    sourceName = starter.name;
+    sourceDoc = starter.document;
+  } else {
+    const { data, error } = await supabase
+      .from('templates')
+      .select('name, json_content, is_starter')
+      .eq('id', starterId)
+      .maybeSingle();
+    if (error || !data) return { ok: false, error: error?.message ?? 'Template not found.' };
+    if (!data.is_starter) return { ok: false, error: 'This template is not marked as a starter.' };
+    sourceName = data.name;
+    sourceDoc = data.json_content as TemplateDocument;
+  }
+
+  // Theme + give every block a fresh id (and buttons fresh link_ids so click
+  // events attribute to *this* campaign template, not the source)
+  const themed = kit ? applyKitToBlocks(sourceDoc.blocks, kit) : sourceDoc.blocks;
+  const fresh: Block[] = themed.map((b) => {
+    if (b.type === 'button') {
+      const btn: ButtonBlock = { ...b, id: uid(), link_id: uid() };
+      return btn;
+    }
+    return { ...b, id: uid() } as Block;
+  });
+  const doc: TemplateDocument = { ...sourceDoc, blocks: fresh };
+
+  // Insert as a normal (non-starter) template, tagged with the kit
+  const { data: tplRow, error: insertErr } = await supabase
+    .from('templates')
+    .insert({
+      name: `${campaign.name || 'Campanha'} — ${sourceName}`,
+      json_content: doc,
+      html_content: compileTemplate(doc),
+      created_by: profile.id,
+      brand_kit_id: campaign.brand_kit_id,
+      is_starter: false,
+    })
+    .select('id')
+    .single();
+  if (insertErr) return { ok: false, error: insertErr.message };
+
+  // Link to campaign
+  const { error: linkErr } = await supabase
+    .from('campaigns')
+    .update({ template_id: tplRow.id })
+    .eq('id', campaignId);
+  if (linkErr) return { ok: false, error: linkErr.message };
+
+  revalidatePath('/templates');
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true, id: tplRow.id };
 }
 
 /** Resolve the unique recipient list for a campaign (subscribed contacts only). */
