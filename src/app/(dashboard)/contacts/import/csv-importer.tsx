@@ -166,8 +166,17 @@ export function CsvImporter() {
     }
 
     // Build payload rows
-    const payload = rows.map((r) => {
-      const out: Record<string, string> & { custom_fields?: Record<string, string> } = {};
+    type Payload = {
+      email?: string;
+      name?: string;
+      phone?: string;
+      company?: string;
+      tag?: string;
+      status?: string;
+      custom_fields?: Record<string, string>;
+    };
+    const payload: Payload[] = rows.map((r) => {
+      const out: Payload = {};
       const custom: Record<string, string> = {};
       for (const [csvCol, m] of Object.entries(columnMap)) {
         const val = r[csvCol] ?? '';

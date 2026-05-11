@@ -69,14 +69,16 @@ export function prepareCampaignHtml(rawHtml: string, campaignId: string): Prepar
   return { html: withPixel, links };
 }
 
-/** A contact for the purposes of merge-tag substitution. */
+/** A contact for the purposes of merge-tag substitution.
+ * `custom_fields` is typed as unknown because Supabase returns Json which
+ * isn't directly assignable to Record<string, unknown>. We narrow at runtime. */
 type ContactForMerge = {
   id: string;
   email: string;
   name: string | null;
   phone?: string | null;
   company?: string | null;
-  custom_fields?: Record<string, unknown> | null;
+  custom_fields?: unknown;
 };
 
 /**
@@ -88,8 +90,9 @@ type ContactForMerge = {
 function buildMergeMap(contact: ContactForMerge): Record<string, string> {
   const map: Record<string, string> = {};
   // Custom fields first — standard ones overwrite if there's a name collision.
-  if (contact.custom_fields && typeof contact.custom_fields === 'object') {
-    for (const [k, v] of Object.entries(contact.custom_fields)) {
+  const cf = contact.custom_fields;
+  if (cf && typeof cf === 'object' && !Array.isArray(cf)) {
+    for (const [k, v] of Object.entries(cf as Record<string, unknown>)) {
       if (v == null) continue;
       map[k] = String(v);
     }

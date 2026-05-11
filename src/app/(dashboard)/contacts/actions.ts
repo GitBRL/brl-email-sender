@@ -64,7 +64,13 @@ export async function deleteContact(id: string): Promise<ActionState> {
 const STANDARD_KEYS = new Set(['email', 'name', 'phone', 'company', 'tag', 'status']);
 
 /** A single row coming from the importer. Standard fields live at top-level, custom fields nested. */
-export type ImportRowInput = Record<string, string> & {
+export type ImportRowInput = {
+  email?: string;
+  name?: string;
+  phone?: string;
+  company?: string;
+  tag?: string;
+  status?: string;
   custom_fields?: Record<string, string>;
 };
 
