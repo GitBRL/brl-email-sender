@@ -1,10 +1,12 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireProfile } from '@/lib/auth';
 import { FROM_EMAIL, FROM_NAME, APP_URL } from '@/lib/resend';
+import type { BrandKit } from '@/lib/brand-kits';
 import { RoleSelect } from './_role-select';
 import { InviteForm } from './_invite-form';
 import { RemoveMemberButton } from './_remove-button';
 import { DefaultsForm, type AppSettingsRow } from './_defaults-form';
+import { BrandKitsSection } from './_brand-kits-section';
 
 type ProfileRow = {
   id: string;
@@ -25,8 +27,8 @@ export default async function SettingsPage() {
   const isAdmin = profile.role === 'admin';
   const supabase = createServiceClient();
 
-  // Fetch team members + app settings in parallel
-  const [profilesRes, settingsRes] = await Promise.all([
+  // Fetch team members + app settings + brand kits in parallel
+  const [profilesRes, settingsRes, kitsRes] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, email, name, role, created_at')
@@ -36,9 +38,15 @@ export default async function SettingsPage() {
       .select('from_name, from_email, reply_to, unsub_heading, unsub_body')
       .eq('id', true)
       .maybeSingle<AppSettingsRow>(),
+    supabase
+      .from('brand_kits')
+      .select('*')
+      .order('is_custom')
+      .order('name'),
   ]);
 
   const members = (profilesRes.data ?? []) as ProfileRow[];
+  const kits = (kitsRes.data ?? []) as BrandKit[];
   const settings: AppSettingsRow = settingsRes.data ?? {
     from_name: null,
     from_email: null,
@@ -178,6 +186,13 @@ export default async function SettingsPage() {
           </p>
         )}
       </section>
+
+      {/* Brand kits */}
+      <BrandKitsSection
+        kits={kits}
+        canEdit={isAdmin || profile.role === 'editor'}
+        canDelete={isAdmin}
+      />
 
       {/* Integrations status — read-only */}
       <section className="bg-white rounded-lg border border-zinc-200 p-6">
