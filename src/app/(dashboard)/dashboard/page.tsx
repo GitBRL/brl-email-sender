@@ -19,7 +19,7 @@ export default async function DashboardPage() {
     recentRes,
     eventsRes,
   ] = await Promise.all([
-    supabase.from('contacts').select('id, tag, status'),
+    supabase.from('contacts').select('id, tag, status, created_at'),
     supabase.from('campaigns').select('*', { count: 'exact', head: true }).eq('status', 'sent'),
     supabase
       .from('campaigns')
@@ -77,6 +77,37 @@ export default async function DashboardPage() {
     else if (e.event_type === 'clicked') clicks[dayIdx]++;
   }
 
+  // 90-day audience growth: cumulative contact count by day.
+  const growthLabels: string[] = [];
+  const newPerDay: number[] = new Array(90).fill(0);
+  const growthStart = new Date();
+  growthStart.setDate(growthStart.getDate() - 89);
+  growthStart.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 90; i++) {
+    const d = new Date(growthStart);
+    d.setDate(d.getDate() + i);
+    growthLabels.push(`${d.getDate()}/${d.getMonth() + 1}`);
+  }
+  // Count contacts created before the 90-day window opens
+  let baseline = 0;
+  for (const c of contacts) {
+    const created = new Date(c.created_at).getTime();
+    if (created < growthStart.getTime()) {
+      baseline++;
+      continue;
+    }
+    const day = Math.floor((created - growthStart.getTime()) / 86_400_000);
+    if (day >= 0 && day < 90) newPerDay[day]++;
+  }
+  // Build cumulative series
+  const cumulative: number[] = new Array(90);
+  let running = baseline;
+  for (let i = 0; i < 90; i++) {
+    running += newPerDay[i];
+    cumulative[i] = running;
+  }
+  const new90 = newPerDay.reduce((a, b) => a + b, 0);
+
   return (
     <div className="p-8 space-y-8 max-w-6xl">
       <header>
@@ -108,6 +139,26 @@ export default async function DashboardPage() {
             { name: 'Clicks', color: '#3b82f6', data: clicks },
           ]}
           height={200}
+        />
+      </section>
+
+      <section className="bg-white rounded-lg border border-zinc-200 p-6">
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            Audience growth — last 90 days
+          </h2>
+          <span className="text-xs text-zinc-500">
+            +{new90.toLocaleString('pt-BR')} new contact{new90 === 1 ? '' : 's'} ·{' '}
+            <span className="text-zinc-900 font-medium">
+              {totalContacts.toLocaleString('pt-BR')}
+            </span>{' '}
+            total
+          </span>
+        </div>
+        <SparkLine
+          labels={growthLabels}
+          series={[{ name: 'Total contacts', color: '#f47216', data: cumulative }]}
+          height={180}
         />
       </section>
 

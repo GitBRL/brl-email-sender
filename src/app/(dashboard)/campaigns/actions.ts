@@ -150,8 +150,21 @@ export async function sendCampaign(id: string): Promise<ActionState> {
       );
   }
 
+  // Resolve From / Reply-to with fallback chain:
+  //   1. campaign.from_name/from_email/reply_to (per-campaign override)
+  //   2. app_settings table (admin-edited defaults)
+  //   3. env vars (FROM_NAME / FROM_EMAIL)
+  const { data: appSettings } = await supabase
+    .from('app_settings')
+    .select('from_name, from_email, reply_to')
+    .eq('id', true)
+    .maybeSingle();
+  const effFromName = campaign.from_name || appSettings?.from_name || FROM_NAME;
+  const effFromEmail = campaign.from_email || appSettings?.from_email || FROM_EMAIL;
+  const effReplyTo = campaign.reply_to ?? appSettings?.reply_to ?? undefined;
+
   // Send (sequential to respect Resend rate limits; can be parallelised later)
-  const fromHeader = `${campaign.from_name || FROM_NAME} <${campaign.from_email || FROM_EMAIL}>`;
+  const fromHeader = `${effFromName} <${effFromEmail}>`;
   let sent = 0;
   let failed = 0;
 
@@ -165,7 +178,7 @@ export async function sendCampaign(id: string): Promise<ActionState> {
         to: r.email,
         subject,
         html,
-        replyTo: campaign.reply_to ?? undefined,
+        replyTo: effReplyTo ?? undefined,
       });
 
       if (sendErr) throw new Error(sendErr.message);

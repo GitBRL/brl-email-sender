@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Download } from 'lucide-react';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireProfile } from '@/lib/auth';
 import { pct } from '@/lib/utils';
@@ -207,6 +207,15 @@ export default async function CampaignDetailPage({
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
+          {campaign.status === 'sent' && (
+            <a
+              href={`/campaigns/${campaign.id}/export`}
+              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-zinc-50"
+              title="Export recipients + per-email outcomes as CSV"
+            >
+              <Download size={14} /> Export CSV
+            </a>
+          )}
           {canEdit && campaign.status === 'draft' && <SendNowButton id={campaign.id} />}
           <CampaignRowActions id={campaign.id} name={campaign.name} canDelete={canDelete} />
         </div>
@@ -259,9 +268,19 @@ export default async function CampaignDetailPage({
           <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
             Click heatmap — top links
           </h2>
-          <span className="text-xs text-zinc-400">
-            {heatmapItems.length} link{heatmapItems.length === 1 ? '' : 's'}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-zinc-400">
+              {heatmapItems.length} link{heatmapItems.length === 1 ? '' : 's'}
+            </span>
+            {campaign.template_id && (
+              <Link
+                href={`/campaigns/${campaign.id}/heatmap`}
+                className="text-xs font-medium text-brl-orange hover:underline"
+              >
+                View visual heatmap →
+              </Link>
+            )}
+          </div>
         </div>
         <BarList
           items={heatmapItems}
