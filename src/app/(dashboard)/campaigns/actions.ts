@@ -115,10 +115,10 @@ export async function sendCampaign(id: string): Promise<ActionState> {
     .maybeSingle();
   if (tErr || !template?.html_content) return { ok: false, error: 'Template HTML is empty.' };
 
-  // Resolve recipients
+  // Resolve recipients (include phone/company/custom_fields so they can be used as merge tags)
   let recipientsQuery = supabase
     .from('contacts')
-    .select('id, email, name')
+    .select('id, email, name, phone, company, custom_fields')
     .eq('status', 'subscribed');
   if (campaign.filter_tag) recipientsQuery = recipientsQuery.eq('tag', campaign.filter_tag);
   if ((campaign.list_ids ?? []).length > 0)
@@ -156,8 +156,8 @@ export async function sendCampaign(id: string): Promise<ActionState> {
   let failed = 0;
 
   for (const r of recipients) {
-    const html = personalize(prepared.html, { id: r.id, email: r.email, name: r.name });
-    const subject = personalizeSubject(campaign.subject, { name: r.name, email: r.email });
+    const html = personalize(prepared.html, r);
+    const subject = personalizeSubject(campaign.subject, r);
 
     try {
       const { data: sentRes, error: sendErr } = await resend.emails.send({

@@ -82,6 +82,27 @@ export default async function ContactDetailPage({
         </dl>
       </section>
 
+      {contact.custom_fields && Object.keys(contact.custom_fields).length > 0 && (
+        <section className="bg-white rounded-lg border border-zinc-200 p-6 mb-8">
+          <div className="flex items-baseline justify-between mb-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+              Custom fields
+            </h2>
+            <span className="text-[10px] text-zinc-400">
+              usable as <code className="bg-zinc-100 px-1 rounded">{'{{merge_tag}}'}</code> in campaigns
+            </span>
+          </div>
+          <dl className="grid grid-cols-1 md:grid-cols-2 gap-y-2.5 text-sm">
+            {Object.entries(contact.custom_fields).map(([k, v]) => (
+              <div key={k}>
+                <dt className="font-mono text-[11px] text-blue-700">{'{{'}{k}{'}}'}</dt>
+                <dd className="text-zinc-800 truncate">{String(v ?? '')}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
           Activity ({events?.length ?? 0})

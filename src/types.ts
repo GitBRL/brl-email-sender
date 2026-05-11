@@ -32,6 +32,8 @@ export type Contact = {
   status: ContactStatus;
   lists: string[];
   metadata: Record<string, unknown>;
+  /** Free-form key/value bag for fields imported from CSV that don't match a standard column. Usable as `{{key}}` merge tags in campaigns. */
+  custom_fields: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };

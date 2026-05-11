@@ -69,23 +69,59 @@ export function prepareCampaignHtml(rawHtml: string, campaignId: string): Prepar
   return { html: withPixel, links };
 }
 
-export function personalize(
-  preparedHtml: string,
-  contact: { id: string; email: string; name: string | null },
-): string {
+/** A contact for the purposes of merge-tag substitution. */
+type ContactForMerge = {
+  id: string;
+  email: string;
+  name: string | null;
+  phone?: string | null;
+  company?: string | null;
+  custom_fields?: Record<string, unknown> | null;
+};
+
+/**
+ * Build the merge-tag dictionary for a contact. Standard fields take precedence
+ * over custom fields (so a custom field accidentally named "email" won't shadow
+ * the contact's actual email). Reserved keys (`__contact_id__`, `unsubscribe_url`)
+ * are likewise protected.
+ */
+function buildMergeMap(contact: ContactForMerge): Record<string, string> {
+  const map: Record<string, string> = {};
+  // Custom fields first — standard ones overwrite if there's a name collision.
+  if (contact.custom_fields && typeof contact.custom_fields === 'object') {
+    for (const [k, v] of Object.entries(contact.custom_fields)) {
+      if (v == null) continue;
+      map[k] = String(v);
+    }
+  }
+  map.name = contact.name ?? '';
+  map.email = contact.email;
+  if (contact.phone != null) map.phone = contact.phone;
+  if (contact.company != null) map.company = contact.company;
+  return map;
+}
+
+/** Replace every `{{key}}` in `text` using the supplied dictionary. */
+function applyMergeTags(text: string, map: Record<string, string>): string {
+  return text.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, (whole, key) => {
+    // Reserved tokens handled by the caller.
+    if (key === '__contact_id__' || key === 'unsubscribe_url') return whole;
+    if (Object.prototype.hasOwnProperty.call(map, key)) return map[key];
+    // Unknown tag — leave it visible so the operator notices and fixes it,
+    // rather than silently shipping a literal "{{curso}}" to recipients with
+    // an empty replacement.
+    return '';
+  });
+}
+
+export function personalize(preparedHtml: string, contact: ContactForMerge): string {
   const unsub = `${APP_URL}/api/unsubscribe?uid=${encodeURIComponent(contact.id)}`;
-  return preparedHtml
+  const map = buildMergeMap(contact);
+  return applyMergeTags(preparedHtml, map)
     .replace(/\{\{__contact_id__\}\}/g, contact.id)
-    .replace(/\{\{\s*name\s*\}\}/gi, contact.name ?? '')
-    .replace(/\{\{\s*email\s*\}\}/gi, contact.email)
     .replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, unsub);
 }
 
-export function personalizeSubject(
-  subject: string,
-  contact: { name: string | null; email: string },
-): string {
-  return subject
-    .replace(/\{\{\s*name\s*\}\}/gi, contact.name ?? '')
-    .replace(/\{\{\s*email\s*\}\}/gi, contact.email);
+export function personalizeSubject(subject: string, contact: ContactForMerge): string {
+  return applyMergeTags(subject, buildMergeMap(contact));
 }
