@@ -30,6 +30,8 @@ export type ImageBlock = BlockBase & {
   alt: string;
   width: number; // px
   href?: string;
+  /** Horizontal placement within the block's row. Defaults to 'center'. */
+  align?: 'left' | 'center' | 'right';
 };
 
 export type ButtonBlock = BlockBase & {
@@ -89,7 +91,14 @@ export function makeBlock(type: Block['type']): Block {
     case 'text':
       return { id, type, text: 'Write your message here.', align: 'left', color: '#2b2b2b' };
     case 'image':
-      return { id, type, src: 'https://placehold.co/600x300?text=Image', alt: '', width: 600 };
+      return {
+        id,
+        type,
+        src: 'https://placehold.co/600x300?text=Image',
+        alt: '',
+        width: 600,
+        align: 'center',
+      };
     case 'button':
       return {
         id,
@@ -112,4 +121,19 @@ export function makeBlock(type: Block['type']): Block {
         text: 'BRL Educação · {{unsubscribe_url}}',
       };
   }
+}
+
+/**
+ * Convenience preset for the "Logo" palette item — a 200x200 image block
+ * centered by default. Replace the src in the editor with your own logo.
+ */
+export function makeLogo(): ImageBlock {
+  return {
+    id: uid(),
+    type: 'image',
+    src: 'https://placehold.co/200x200/2b2b2b/ffcd01?text=Logo',
+    alt: 'Logo',
+    width: 200,
+    align: 'center',
+  };
 }

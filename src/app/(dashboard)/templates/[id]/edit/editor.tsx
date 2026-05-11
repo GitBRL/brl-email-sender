@@ -4,17 +4,25 @@ import { useState, useTransition, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Type, Heading1, Image as ImageIcon, MousePointerClick, Minus, Square, Mail, Trash2, ChevronUp, ChevronDown, Eye, Save, GripVertical,
+  Building2,
 } from 'lucide-react';
 import {
   type Block, type TemplateDocument, type ButtonBlock, type ImageBlock, type HeaderBlock, type TextBlock,
-  type DividerBlock, type SpacerBlock, type FooterBlock, makeBlock,
+  type DividerBlock, type SpacerBlock, type FooterBlock, makeBlock, makeLogo,
 } from '@/lib/blocks';
 import { saveTemplate } from '../../actions';
 import { cn } from '@/lib/utils';
 
-const PALETTE: Array<{ type: Block['type']; label: string; icon: React.ReactNode }> = [
+/** Palette item. Either `type` (uses makeBlock) or `make` (custom preset like Logo). */
+type PaletteItem = {
+  label: string;
+  icon: React.ReactNode;
+} & ({ type: Block['type'] } | { make: () => Block });
+
+const PALETTE: PaletteItem[] = [
   { type: 'header',  label: 'Heading',  icon: <Heading1 size={16} /> },
   { type: 'text',    label: 'Text',     icon: <Type size={16} /> },
+  { make: makeLogo,  label: 'Logo',     icon: <Building2 size={16} /> },
   { type: 'image',   label: 'Image',    icon: <ImageIcon size={16} /> },
   { type: 'button',  label: 'Button',   icon: <MousePointerClick size={16} /> },
   { type: 'divider', label: 'Divider',  icon: <Minus size={16} /> },
@@ -26,10 +34,15 @@ export function TemplateEditor({
   templateId,
   initialName,
   initialDoc,
+  initialIsStarter,
+  canMarkStarter,
 }: {
   templateId: string;
   initialName: string;
   initialDoc: TemplateDocument;
+  initialIsStarter: boolean;
+  /** Only admins can promote a template to the shared starter gallery. */
+  canMarkStarter: boolean;
 }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
@@ -39,11 +52,12 @@ export function TemplateEditor({
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [isStarter, setIsStarter] = useState(initialIsStarter);
 
   const selected = doc.blocks.find((b) => b.id === selectedId) ?? null;
 
-  const addBlock = useCallback((type: Block['type']) => {
-    const block = makeBlock(type);
+  const addBlock = useCallback((item: PaletteItem) => {
+    const block = 'make' in item ? item.make() : makeBlock(item.type);
     setDoc((d) => ({ ...d, blocks: [...d.blocks, block] }));
     setSelectedId(block.id);
   }, []);
@@ -87,7 +101,7 @@ export function TemplateEditor({
   function save() {
     setError(null);
     start(async () => {
-      const res = await saveTemplate(templateId, name, doc);
+      const res = await saveTemplate(templateId, name, doc, { is_starter: isStarter });
       if (!res.ok) setError(res.error ?? 'Failed to save');
       else {
         setSavedAt(new Date().toLocaleTimeString('pt-BR'));
@@ -109,9 +123,9 @@ export function TemplateEditor({
         <div className="space-y-1">
           {PALETTE.map((p) => (
             <button
-              key={p.type}
+              key={p.label}
               type="button"
-              onClick={() => addBlock(p.type)}
+              onClick={() => addBlock(p)}
               className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-zinc-100 text-left"
             >
               {p.icon}
@@ -150,6 +164,20 @@ export function TemplateEditor({
               </button>
             </div>
           </div>
+          {canMarkStarter && (
+            <label className="flex items-center gap-2 mb-3 text-xs bg-white border border-zinc-200 rounded-md px-3 py-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isStarter}
+                onChange={(e) => setIsStarter(e.target.checked)}
+                className="accent-brl-orange"
+              />
+              <span className="font-medium">Save as starter template</span>
+              <span className="text-zinc-500">
+                — appears in the gallery for everyone on your team to clone.
+              </span>
+            </label>
+          )}
           {error && <p className="text-sm text-brl-error bg-red-50 border border-red-100 rounded px-3 py-2 mb-3">{error}</p>}
 
           <div
@@ -295,6 +323,7 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
           <Field label="Image URL"><input value={block.src} onChange={(e) => onChange({ src: e.target.value } as Partial<ImageBlock>)} className={inputCls} /></Field>
           <Field label="Alt text"><input value={block.alt} onChange={(e) => onChange({ alt: e.target.value } as Partial<ImageBlock>)} className={inputCls} /></Field>
           <Field label="Width (px)"><input type="number" min={50} max={1200} value={block.width} onChange={(e) => onChange({ width: parseInt(e.target.value, 10) || 600 } as Partial<ImageBlock>)} className={inputCls} /></Field>
+          <AlignField value={block.align ?? 'center'} onChange={(v) => onChange({ align: v } as Partial<ImageBlock>)} />
           <Field label="Click URL (optional)"><input value={block.href ?? ''} onChange={(e) => onChange({ href: e.target.value } as Partial<ImageBlock>)} className={inputCls} placeholder="https://…" /></Field>
         </div>
       );

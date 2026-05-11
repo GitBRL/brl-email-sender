@@ -30,9 +30,18 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
         <p style="margin:0;color:${b.color};font-family:Inter,Arial,sans-serif;font-size:15px;line-height:1.6;">${esc(b.text).replace(/\n/g, '<br/>')}</p>
       </td></tr>`;
     case 'image': {
+      const align = b.align ?? 'center';
       const img = `<img src="${esc(b.src)}" alt="${esc(b.alt)}" width="${b.width}" style="display:block;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;" />`;
       const wrapped = b.href ? `<a href="${esc(b.href)}" style="text-decoration:none;">${img}</a>` : img;
-      return `<tr><td style="padding:8px 24px;text-align:center;">${wrapped}</td></tr>`;
+      // Email clients need explicit margins for image alignment — they ignore
+      // float and inconsistently honor text-align on block images.
+      const margin =
+        align === 'left' ? '0 auto 0 0' : align === 'right' ? '0 0 0 auto' : '0 auto';
+      const sized = wrapped.replace(
+        'style="display:block;',
+        `style="display:block;margin:${margin};`,
+      );
+      return `<tr><td style="padding:8px 24px;text-align:${align};">${sized}</td></tr>`;
     }
     case 'button': {
       // Use data-link-id so we can find buttons in the rendered HTML for tracking + heatmap positioning.

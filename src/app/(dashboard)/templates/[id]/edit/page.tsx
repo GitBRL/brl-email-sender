@@ -7,12 +7,12 @@ import { DEFAULT_DOCUMENT, type TemplateDocument } from '@/lib/blocks';
 import { TemplateEditor } from './editor';
 
 export default async function EditTemplatePage({ params }: { params: Promise<{ id: string }> }) {
-  await requireRole('editor');
+  const profile = await requireRole('editor');
   const { id } = await params;
   const supabase = createServiceClient();
   const { data: template } = await supabase
     .from('templates')
-    .select('id, name, json_content')
+    .select('id, name, json_content, is_starter')
     .eq('id', id)
     .maybeSingle();
   if (!template) notFound();
@@ -32,7 +32,13 @@ export default async function EditTemplatePage({ params }: { params: Promise<{ i
         </div>
       </header>
       <div className="flex-1 overflow-hidden">
-        <TemplateEditor templateId={template.id} initialName={template.name} initialDoc={doc} />
+        <TemplateEditor
+          templateId={template.id}
+          initialName={template.name}
+          initialDoc={doc}
+          initialIsStarter={!!template.is_starter}
+          canMarkStarter={profile.role === 'admin'}
+        />
       </div>
     </div>
   );
