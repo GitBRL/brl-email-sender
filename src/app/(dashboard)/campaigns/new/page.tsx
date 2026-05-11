@@ -18,7 +18,7 @@ export default async function NewCampaignPage() {
   ]);
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-6 sm:p-8 max-w-7xl">
       <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-brl-dark mb-4">
         <ChevronLeft size={14} /> Back to campaigns
       </Link>

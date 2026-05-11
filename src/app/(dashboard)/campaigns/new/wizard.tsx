@@ -404,14 +404,23 @@ export function Wizard({
                 wrapped in an iframe with ?embedded=1 so the dashboard sidebar
                 + page header are stripped, leaving only the 3-column editor
                 (palette / canvas / properties). Iframe gives perfect CSS
-                isolation without refactoring the editor for embedding. */}
+                isolation without refactoring the editor for embedding.
+
+                Sizing: dvh (dynamic viewport height) accounts for mobile
+                browser UI chrome that vh doesn't. We subtract ~280px to
+                leave room for the wizard's stepper + step header + footer
+                buttons, with a generous 640px floor so the 3-column editor
+                stays usable. Width 100% lets the editor flex from mobile
+                up to the wizard's max-w container. On small viewports the
+                iframe scrolls horizontally (the editor needs ~1100px to
+                show all 3 columns side-by-side; below that, scroll). */}
             {effectiveTemplateId ? (
               <div className="rounded-md border border-zinc-200 overflow-hidden bg-white">
                 <iframe
                   src={`/templates/${effectiveTemplateId}/edit?embedded=1`}
                   title="Editor de template"
-                  className="w-full bg-white block"
-                  style={{ height: 'calc(100vh - 240px)', minHeight: 600 }}
+                  className="block w-full bg-white"
+                  style={{ height: 'min(calc(100dvh - 280px), 1000px)', minHeight: 'min(640px, 70dvh)' }}
                 />
               </div>
             ) : (
@@ -582,18 +591,38 @@ export function Wizard({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (!campaignId || !testEmail.trim()) return;
+                  if (!campaignId) {
+                    setTestStatus('error');
+                    setTestMessage('Campanha ainda não foi salva. Volte para Settings, salve, e tente novamente.');
+                    return;
+                  }
+                  const addr = testEmail.trim();
+                  if (!addr) {
+                    setTestStatus('error');
+                    setTestMessage('Digite um endereço de email.');
+                    return;
+                  }
                   setTestStatus('sending');
                   setTestMessage(null);
-                  sendTestEmail(campaignId, testEmail).then((res) => {
-                    if (res.ok) {
-                      setTestStatus('sent');
-                      setTestMessage(`Enviado para ${testEmail}`);
-                    } else {
+                  sendTestEmail(campaignId, addr)
+                    .then((res) => {
+                      if (res.ok) {
+                        setTestStatus('sent');
+                        setTestMessage(`Enviado para ${addr}. Cheque a caixa de entrada (e a pasta de spam).`);
+                      } else {
+                        setTestStatus('error');
+                        setTestMessage(res.error ?? 'Falha no envio (sem detalhes).');
+                        // Surface the raw error in the browser console for debugging
+                        console.error('[test-send] failed:', res.error);
+                      }
+                    })
+                    .catch((err: unknown) => {
+                      // Catches uncaught throws from the server action (network, Resend SDK explosions, etc.)
                       setTestStatus('error');
-                      setTestMessage(res.error ?? 'Falha no envio');
-                    }
-                  });
+                      const msg = err instanceof Error ? err.message : String(err);
+                      setTestMessage(`Erro inesperado: ${msg}`);
+                      console.error('[test-send] uncaught:', err);
+                    });
                 }}
                 className="flex gap-2"
               >

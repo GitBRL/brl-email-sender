@@ -178,15 +178,24 @@ export async function sendTestEmail(
   const fromHeader = `${effFromName} <${effFromEmail}>`;
 
   try {
-    const { error: sendErr } = await resend.emails.send({
+    const result = await resend.emails.send({
       from: fromHeader,
       to: trimmed,
       subject,
       html,
       replyTo: effReplyTo ?? undefined,
     });
-    if (sendErr) return { ok: false, error: sendErr.message };
+    if (result.error) {
+      console.error('[sendTestEmail] Resend rejected:', {
+        to: trimmed,
+        from: fromHeader,
+        error: result.error,
+      });
+      return { ok: false, error: `Resend: ${result.error.message}` };
+    }
+    console.log('[sendTestEmail] sent OK:', { to: trimmed, id: result.data?.id });
   } catch (e) {
+    console.error('[sendTestEmail] threw:', e);
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 

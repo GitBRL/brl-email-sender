@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { BarChart3, Users, ListChecks, Mail, FileText, Settings, LogOut } from 'lucide-react';
+import { BarChart3, Users, ListChecks, Mail, FileText, Settings, LogOut, Plus } from 'lucide-react';
 
 /**
  * Dashboard sidebar — hides itself when the page is loaded with ?embedded=1
@@ -31,10 +31,19 @@ export function Sidebar({
         </div>
       </div>
       <nav className="flex-1 px-3 space-y-1 text-sm">
+        {/* Primary action — start a new campaign in one click. Pinned to the
+            top so it's the first thing the user sees on every page. */}
+        <Link
+          href="/campaigns/new"
+          className="flex items-center gap-2 rounded-md px-3 py-2 mb-2 bg-brl-yellow text-brl-dark font-semibold hover:bg-brl-yellow-hover transition"
+        >
+          <Plus size={16} />
+          <span>Nova campanha</span>
+        </Link>
+        <NavLink href="/campaigns" icon={<Mail size={16} />}>Campaigns</NavLink>
         <NavLink href="/dashboard" icon={<BarChart3 size={16} />}>Dashboard</NavLink>
         <NavLink href="/contacts"  icon={<Users size={16} />}>Contacts</NavLink>
         <NavLink href="/lists"     icon={<ListChecks size={16} />}>Lists</NavLink>
-        <NavLink href="/campaigns" icon={<Mail size={16} />}>Campaigns</NavLink>
         <NavLink href="/templates" icon={<FileText size={16} />}>Templates</NavLink>
         <NavLink href="/settings"  icon={<Settings size={16} />}>Settings</NavLink>
       </nav>
