@@ -3,8 +3,16 @@
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Papa from 'papaparse';
-import { Upload, CheckCircle2, AlertCircle } from 'lucide-react';
+import {
+  Upload,
+  CheckCircle2,
+  AlertCircle,
+  Sparkles,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
 import { bulkImportContacts } from '../actions';
+import { cleanRows, type RawRow } from '@/lib/contact-cleaning';
 
 type StandardKey = 'email' | 'name' | 'phone' | 'company' | 'tag' | 'status';
 type StandardField = {
@@ -123,20 +131,30 @@ export function CsvImporter() {
 
   const hasEmail = usedStandardKeys.has('email');
 
-  /** First 3 rows for preview, with mappings applied. */
-  const previewRows = useMemo(() => {
-    return rows.slice(0, 3).map((r) => {
-      const standard: Partial<Record<StandardKey, string>> = {};
+  /**
+   * Project the raw CSV rows through the column mapping into RawRow shape,
+   * then run the cleaning pipeline. Memoised so it only re-runs when the user
+   * actually changes the mapping (not on every keystroke elsewhere).
+   */
+  const { mapped, cleaned, report } = useMemo(() => {
+    const mapped: RawRow[] = rows.map((r) => {
+      const out: RawRow = {};
       const custom: Record<string, string> = {};
       for (const [csvCol, m] of Object.entries(columnMap)) {
         const val = r[csvCol] ?? '';
         if (!val) continue;
-        if (m.mode === 'standard' && m.standardKey) standard[m.standardKey] = val;
+        if (m.mode === 'standard' && m.standardKey) out[m.standardKey] = val;
         else if (m.mode === 'custom' && m.customName) custom[m.customName] = val;
       }
-      return { standard, custom };
+      if (Object.keys(custom).length > 0) out.custom_fields = custom;
+      return out;
     });
+    const result = cleanRows(mapped);
+    return { mapped, ...result };
   }, [rows, columnMap]);
+
+  // Preview = first 3 cleaned rows for the user to eyeball
+  const previewRows = cleaned.slice(0, 3);
 
   function setMode(csvCol: string, mode: ColumnMap['mode']) {
     setColumnMap((prev) => {
@@ -170,32 +188,13 @@ export function CsvImporter() {
       setError('You must map one column to the standard "Email" field.');
       return;
     }
-
-    // Build payload rows
-    type Payload = {
-      email?: string;
-      name?: string;
-      phone?: string;
-      company?: string;
-      tag?: string;
-      status?: string;
-      custom_fields?: Record<string, string>;
-    };
-    const payload: Payload[] = rows.map((r) => {
-      const out: Payload = {};
-      const custom: Record<string, string> = {};
-      for (const [csvCol, m] of Object.entries(columnMap)) {
-        const val = r[csvCol] ?? '';
-        if (!val) continue;
-        if (m.mode === 'standard' && m.standardKey) out[m.standardKey] = val;
-        else if (m.mode === 'custom' && m.customName) custom[m.customName] = val;
-      }
-      if (Object.keys(custom).length > 0) out.custom_fields = custom;
-      return out;
-    });
+    if (cleaned.length === 0) {
+      setError('No valid rows after cleaning. Check the report below.');
+      return;
+    }
 
     start(async () => {
-      const res = await bulkImportContacts(payload);
+      const res = await bulkImportContacts(cleaned);
       setResult({ imported: res.imported, skipped: res.skipped, errors: res.errors });
       if (res.ok && res.errors.length === 0) {
         setTimeout(() => {
@@ -360,16 +359,24 @@ export function CsvImporter() {
             </ul>
           </div>
 
-          {/* Preview */}
+          {/* Cleaning report */}
+          {hasEmail && <CleaningReportPanel report={report} mappedSample={mapped} />}
+
+          {/* Preview (post-clean) */}
           <div className="bg-white rounded-lg border border-zinc-200 p-6">
             <h2 className="text-sm font-semibold mb-3">
-              Preview <span className="text-zinc-400 font-normal">(first 3 rows)</span>
+              Preview after cleaning{' '}
+              <span className="text-zinc-400 font-normal">(first 3 of {cleaned.length})</span>
             </h2>
             {!hasEmail ? (
               <div className="bg-amber-50 border border-amber-100 rounded p-3 text-sm text-amber-800 flex items-center gap-2">
                 <AlertCircle size={14} /> Map at least one column to the standard{' '}
                 <strong>Email</strong> field before importing.
               </div>
+            ) : previewRows.length === 0 ? (
+              <p className="text-sm text-zinc-500 italic">
+                No valid rows after cleaning. Check the report above for dropped rows.
+              </p>
             ) : (
               <div className="space-y-3">
                 {previewRows.map((row, i) => (
@@ -378,20 +385,23 @@ export function CsvImporter() {
                     className="border border-zinc-200 rounded p-3 text-xs space-y-1.5"
                   >
                     <div className="font-mono text-zinc-500">Row {i + 1}</div>
-                    {Object.entries(row.standard).map(([k, v]) => (
-                      <div key={k} className="flex gap-2">
-                        <span className="font-medium text-zinc-700 min-w-[80px]">{k}:</span>
-                        <span className="font-mono">{v}</span>
-                      </div>
-                    ))}
-                    {Object.keys(row.custom).length > 0 && (
+                    {(['email', 'name', 'phone', 'company', 'tag', 'status'] as const).map(
+                      (k) =>
+                        row[k] ? (
+                          <div key={k} className="flex gap-2">
+                            <span className="font-medium text-zinc-700 min-w-[80px]">{k}:</span>
+                            <span className="font-mono">{row[k]}</span>
+                          </div>
+                        ) : null
+                    )}
+                    {row.custom_fields && Object.keys(row.custom_fields).length > 0 && (
                       <details className="ml-1 mt-1">
                         <summary className="text-zinc-500 cursor-pointer text-[11px]">
-                          + {Object.keys(row.custom).length} custom field
-                          {Object.keys(row.custom).length === 1 ? '' : 's'}
+                          + {Object.keys(row.custom_fields).length} custom field
+                          {Object.keys(row.custom_fields).length === 1 ? '' : 's'}
                         </summary>
                         <div className="mt-1 pl-3 space-y-0.5">
-                          {Object.entries(row.custom).map(([k, v]) => (
+                          {Object.entries(row.custom_fields).map(([k, v]) => (
                             <div key={k} className="flex gap-2">
                               <span className="font-mono text-blue-700 min-w-[80px]">
                                 {'{{'}{k}{'}}'}
@@ -411,11 +421,13 @@ export function CsvImporter() {
           <div className="flex justify-end">
             <button
               type="button"
-              disabled={pending || !hasEmail}
+              disabled={pending || !hasEmail || cleaned.length === 0}
               onClick={onImport}
               className="rounded-md bg-brl-yellow text-brl-dark font-semibold px-4 py-2 text-sm hover:bg-brl-yellow-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {pending ? 'Importing…' : `Import ${rows.length.toLocaleString('pt-BR')} rows`}
+              {pending
+                ? 'Importing…'
+                : `Import ${cleaned.length.toLocaleString('pt-BR')} cleaned row${cleaned.length === 1 ? '' : 's'}`}
             </button>
           </div>
         </>
@@ -446,4 +458,268 @@ function ModePill({
       {label}
     </button>
   );
+}
+
+function CleaningReportPanel({
+  report,
+  mappedSample,
+}: {
+  report: import('@/lib/contact-cleaning').CleaningReport;
+  mappedSample: import('@/lib/contact-cleaning').RawRow[];
+}) {
+  const [open, setOpen] = useState(true);
+  const noOps =
+    report.duplicatesMerged === 0 &&
+    report.invalidEmails.length === 0 &&
+    report.junkSkipped.length === 0 &&
+    report.emailsFixed.length === 0 &&
+    report.phonesNormalized === 0 &&
+    report.phonesDropped.length === 0 &&
+    report.namesNormalized === 0 &&
+    report.tagsMapped.length === 0 &&
+    report.statusesMapped.length === 0;
+
+  return (
+    <div className="bg-white rounded-lg border border-zinc-200 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-2 p-4 text-left hover:bg-zinc-50"
+      >
+        <div className="flex items-center gap-2">
+          <Sparkles size={16} className="text-brl-orange" />
+          <h2 className="text-sm font-semibold">Cleaning report</h2>
+          {noOps ? (
+            <span className="text-xs text-zinc-500">— data was already clean</span>
+          ) : (
+            <span className="text-xs text-zinc-500">
+              — {report.totalIn.toLocaleString('pt-BR')} in → {report.totalOut.toLocaleString('pt-BR')} ready to import
+            </span>
+          )}
+        </div>
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-3 border-t border-zinc-100 pt-3">
+          {/* Counts grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <ReportTile
+              label="Duplicates merged"
+              value={report.duplicatesMerged}
+              tone={report.duplicatesMerged > 0 ? 'good' : 'neutral'}
+            />
+            <ReportTile
+              label="Email typos fixed"
+              value={report.emailsFixed.length}
+              tone={report.emailsFixed.length > 0 ? 'good' : 'neutral'}
+            />
+            <ReportTile
+              label="Phones normalized"
+              value={report.phonesNormalized}
+              tone={report.phonesNormalized > 0 ? 'good' : 'neutral'}
+            />
+            <ReportTile
+              label="Names normalized"
+              value={report.namesNormalized}
+              tone={report.namesNormalized > 0 ? 'good' : 'neutral'}
+            />
+            <ReportTile
+              label="Tags mapped"
+              value={report.tagsMapped.length}
+              tone={report.tagsMapped.length > 0 ? 'good' : 'neutral'}
+            />
+            <ReportTile
+              label="Status mapped"
+              value={report.statusesMapped.length}
+              tone={report.statusesMapped.length > 0 ? 'good' : 'neutral'}
+            />
+            <ReportTile
+              label="Invalid emails"
+              value={report.invalidEmails.length}
+              tone={report.invalidEmails.length > 0 ? 'warn' : 'neutral'}
+            />
+            <ReportTile
+              label="Junk dropped"
+              value={report.junkSkipped.length + report.phonesDropped.length}
+              tone={
+                report.junkSkipped.length + report.phonesDropped.length > 0 ? 'warn' : 'neutral'
+              }
+            />
+          </div>
+
+          {/* Detail accordions */}
+          {report.emailsFixed.length > 0 && (
+            <ReportDetail
+              title={`${report.emailsFixed.length} email domain typo${report.emailsFixed.length === 1 ? '' : 's'} fixed`}
+            >
+              <ul className="space-y-0.5 max-h-40 overflow-auto">
+                {report.emailsFixed.slice(0, 50).map((f, i) => (
+                  <li key={i} className="font-mono text-[11px] text-zinc-700">
+                    Row {f.rowIndex + 1}:{' '}
+                    <span className="text-red-600 line-through">{f.from}</span>
+                    {' → '}
+                    <span className="text-emerald-700">{f.to}</span>
+                  </li>
+                ))}
+                {report.emailsFixed.length > 50 && (
+                  <li className="text-[10px] text-zinc-500 italic">
+                    + {report.emailsFixed.length - 50} more
+                  </li>
+                )}
+              </ul>
+            </ReportDetail>
+          )}
+
+          {report.tagsMapped.length > 0 && (
+            <ReportDetail title={`${report.tagsMapped.length} tag synonym${report.tagsMapped.length === 1 ? '' : 's'} mapped`}>
+              <ul className="space-y-0.5 max-h-40 overflow-auto">
+                {dedupeMappings(report.tagsMapped).map((f, i) => (
+                  <li key={i} className="font-mono text-[11px] text-zinc-700">
+                    <span className="text-zinc-500">{f.from}</span> → {f.to}{' '}
+                    <span className="text-[10px] text-zinc-400">×{f.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </ReportDetail>
+          )}
+
+          {report.statusesMapped.length > 0 && (
+            <ReportDetail
+              title={`${report.statusesMapped.length} status synonym${report.statusesMapped.length === 1 ? '' : 's'} mapped`}
+            >
+              <ul className="space-y-0.5 max-h-40 overflow-auto">
+                {dedupeMappings(report.statusesMapped).map((f, i) => (
+                  <li key={i} className="font-mono text-[11px] text-zinc-700">
+                    <span className="text-zinc-500">{f.from}</span> → {f.to}{' '}
+                    <span className="text-[10px] text-zinc-400">×{f.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </ReportDetail>
+          )}
+
+          {report.invalidEmails.length > 0 && (
+            <ReportDetail
+              title={`${report.invalidEmails.length} row${report.invalidEmails.length === 1 ? '' : 's'} dropped (invalid email)`}
+              tone="warn"
+            >
+              <ul className="space-y-0.5 max-h-40 overflow-auto">
+                {report.invalidEmails.slice(0, 50).map((e, i) => (
+                  <li key={i} className="font-mono text-[11px] text-zinc-700">
+                    Row {e.rowIndex + 1}: &quot;{e.original}&quot;{' '}
+                    <span className="text-zinc-400">({e.reason})</span>
+                  </li>
+                ))}
+                {report.invalidEmails.length > 50 && (
+                  <li className="text-[10px] text-zinc-500 italic">
+                    + {report.invalidEmails.length - 50} more
+                  </li>
+                )}
+              </ul>
+            </ReportDetail>
+          )}
+
+          {report.junkSkipped.length > 0 && (
+            <ReportDetail
+              title={`${report.junkSkipped.length} row${report.junkSkipped.length === 1 ? '' : 's'} dropped (junk / test data)`}
+              tone="warn"
+            >
+              <ul className="space-y-0.5 max-h-40 overflow-auto">
+                {report.junkSkipped.slice(0, 50).map((j, i) => (
+                  <li key={i} className="font-mono text-[11px] text-zinc-700">
+                    Row {j.rowIndex + 1}: {j.original}
+                  </li>
+                ))}
+              </ul>
+            </ReportDetail>
+          )}
+
+          {report.phonesDropped.length > 0 && (
+            <ReportDetail
+              title={`${report.phonesDropped.length} phone${report.phonesDropped.length === 1 ? '' : 's'} dropped (unrecognised format)`}
+              tone="warn"
+            >
+              <ul className="space-y-0.5 max-h-40 overflow-auto">
+                {report.phonesDropped.slice(0, 50).map((p, i) => (
+                  <li key={i} className="font-mono text-[11px] text-zinc-700">
+                    Row {p.rowIndex + 1}: &quot;{p.original}&quot;
+                  </li>
+                ))}
+              </ul>
+            </ReportDetail>
+          )}
+
+          {mappedSample.length > 0 && noOps && (
+            <p className="text-xs text-zinc-500 italic px-1">
+              The mapped data looked good already — no transformations applied.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'good' | 'warn' | 'neutral';
+}) {
+  const cls =
+    tone === 'good'
+      ? 'border-emerald-100 bg-emerald-50/40'
+      : tone === 'warn'
+        ? 'border-amber-100 bg-amber-50/40'
+        : 'border-zinc-100 bg-zinc-50/40';
+  const valueCls =
+    tone === 'good' ? 'text-emerald-700' : tone === 'warn' ? 'text-amber-700' : 'text-zinc-700';
+  return (
+    <div className={`border rounded p-2 ${cls}`}>
+      <div className="text-[10px] text-zinc-500 uppercase tracking-wide">{label}</div>
+      <div className={`text-lg font-bold tabular-nums ${valueCls}`}>
+        {value.toLocaleString('pt-BR')}
+      </div>
+    </div>
+  );
+}
+
+function ReportDetail({
+  title,
+  tone,
+  children,
+}: {
+  title: string;
+  tone?: 'warn';
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      className={`rounded border ${tone === 'warn' ? 'border-amber-100 bg-amber-50/30' : 'border-zinc-100'}`}
+    >
+      <summary
+        className={`cursor-pointer px-3 py-2 text-xs font-medium ${tone === 'warn' ? 'text-amber-800' : 'text-zinc-700'} select-none`}
+      >
+        {title}
+      </summary>
+      <div className="px-3 pb-3">{children}</div>
+    </details>
+  );
+}
+
+function dedupeMappings(
+  items: Array<{ rowIndex: number; from: string; to: string }>,
+): Array<{ from: string; to: string; count: number }> {
+  const counter = new Map<string, { from: string; to: string; count: number }>();
+  for (const it of items) {
+    const key = `${it.from}→${it.to}`;
+    const existing = counter.get(key);
+    if (existing) existing.count++;
+    else counter.set(key, { from: it.from, to: it.to, count: 1 });
+  }
+  return Array.from(counter.values()).sort((a, b) => b.count - a.count);
 }
