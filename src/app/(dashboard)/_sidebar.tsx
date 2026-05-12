@@ -31,7 +31,7 @@ export function Sidebar({
   return (
     <aside className="w-60 bg-brl-dark text-zinc-100 flex flex-col">
       <div className="px-5 pt-6 pb-8">
-        <Link href="/campaigns" className="block">
+        <Link href="/dashboard" className="block">
           {brandLogoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -48,8 +48,8 @@ export function Sidebar({
         </Link>
       </div>
       <nav className="flex-1 px-3 space-y-1 text-sm">
-        <NavLink href="/campaigns" icon={<Mail size={16} />}>Campaigns</NavLink>
         <NavLink href="/dashboard" icon={<BarChart3 size={16} />}>Dashboard</NavLink>
+        <NavLink href="/campaigns" icon={<Mail size={16} />}>Campaigns</NavLink>
         <NavLink href="/contacts"  icon={<Users size={16} />}>Contacts</NavLink>
         <NavLink href="/lists"     icon={<ListChecks size={16} />}>Lists</NavLink>
         <NavLink href="/templates" icon={<FileText size={16} />}>Templates</NavLink>
