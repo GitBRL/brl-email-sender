@@ -2,21 +2,27 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { BarChart3, Users, ListChecks, Mail, FileText, Settings, LogOut, Plus } from 'lucide-react';
+import { BarChart3, Users, ListChecks, Mail, FileText, Settings, LogOut } from 'lucide-react';
 
 /**
  * Dashboard sidebar — hides itself when the page is loaded with ?embedded=1
  * (used when the editor is iframed inside the campaign wizard, where we
  * already have the wizard chrome around it).
+ *
+ * `brandLogoUrl` is the BRL Educação master logo, fetched by the layout
+ * from the brl brand_kit row. Falls back to a text wordmark when absent
+ * (e.g. before the user has uploaded it via Settings → Brand Kits).
  */
 export function Sidebar({
   profileName,
   profileEmail,
   profileRole,
+  brandLogoUrl,
 }: {
   profileName: string | null;
   profileEmail: string;
   profileRole: string;
+  brandLogoUrl: string | null;
 }) {
   const sp = useSearchParams();
   const embedded = sp.get('embedded') === '1' || sp.get('embedded') === 'true';
@@ -25,21 +31,23 @@ export function Sidebar({
   return (
     <aside className="w-60 bg-brl-dark text-zinc-100 flex flex-col">
       <div className="px-5 pt-6 pb-8">
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-3 rounded-sm bg-brl-yellow" />
-          <span className="font-semibold tracking-tight">BRL Email</span>
-        </div>
+        <Link href="/campaigns" className="block">
+          {brandLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={brandLogoUrl}
+              alt="BRL Educação"
+              className="max-h-10 max-w-full object-contain object-left"
+            />
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-3 h-3 rounded-sm bg-brl-yellow" />
+              <span className="font-semibold tracking-tight">BRL Educação</span>
+            </div>
+          )}
+        </Link>
       </div>
       <nav className="flex-1 px-3 space-y-1 text-sm">
-        {/* Primary action — start a new campaign in one click. Pinned to the
-            top so it's the first thing the user sees on every page. */}
-        <Link
-          href="/campaigns/new"
-          className="flex items-center gap-2 rounded-md px-3 py-2 mb-2 bg-brl-yellow text-brl-dark font-semibold hover:bg-brl-yellow-hover transition"
-        >
-          <Plus size={16} />
-          <span>Nova campanha</span>
-        </Link>
         <NavLink href="/campaigns" icon={<Mail size={16} />}>Campaigns</NavLink>
         <NavLink href="/dashboard" icon={<BarChart3 size={16} />}>Dashboard</NavLink>
         <NavLink href="/contacts"  icon={<Users size={16} />}>Contacts</NavLink>
