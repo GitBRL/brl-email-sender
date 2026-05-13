@@ -120,6 +120,7 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
       const weight = b.bold ? 700 : 400;
       const fontStyle = b.italic ? 'italic' : 'normal';
       const tag = b.style === 'numbered' ? 'ol' : 'ul';
+      const listStyle = b.style === 'numbered' ? 'decimal' : 'disc';
       const items = b.items
         .filter((s) => s && s.trim() !== '')
         .map(
@@ -127,11 +128,11 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
             `<li style="margin:0 0 6px 0;padding:0;">${inlineFormat(line)}</li>`,
         )
         .join('');
-      // padding-left is what gives the markers room — email clients vary on
-      // default list-padding. 24px is a safe explicit value across Gmail /
-      // Apple Mail / Outlook.
+      // Explicit list-style + padding-left so markers show. Some email clients
+      // (notably Gmail's mobile webapp) reset list-style to none on injected
+      // HTML; declaring it inline keeps the bullets visible everywhere.
       return `<tr><td style="padding:8px 24px;text-align:${b.align};">
-        <${tag} style="margin:0;padding:0 0 0 24px;color:${b.color};font-family:${EMAIL_FONT_STACK};font-size:${size}px;font-weight:${weight};font-style:${fontStyle};line-height:1.6;">${items}</${tag}>
+        <${tag} style="margin:0;padding:0 0 0 24px;list-style:${listStyle};list-style-position:outside;color:${b.color};font-family:${EMAIL_FONT_STACK};font-size:${size}px;font-weight:${weight};font-style:${fontStyle};line-height:1.6;">${items}</${tag}>
       </td></tr>`;
     }
     default:

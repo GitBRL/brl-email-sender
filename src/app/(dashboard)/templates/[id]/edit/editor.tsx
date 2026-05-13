@@ -501,6 +501,11 @@ function BlockPreview({ block }: { block: Block }) {
             style={{
               margin: 0,
               padding: '0 0 0 24px',
+              // Tailwind's preflight resets list-style to 'none' on ul/ol, so
+              // we re-declare the marker style explicitly. Otherwise the
+              // bullets / numbers wouldn't show in the editor canvas.
+              listStyle: block.style === 'numbered' ? 'decimal' : 'disc',
+              listStylePosition: 'outside',
               color: block.color,
               fontFamily: PREVIEW_FONT_STACK,
               fontSize,
@@ -811,16 +816,35 @@ function MdToolbar({
     'rounded border border-zinc-200 bg-white hover:bg-zinc-100 transition shrink-0 grid place-items-center',
     size === 'sm' ? 'w-6 h-6 text-[11px]' : 'w-7 h-7 text-xs',
   );
+  // Critical: preventDefault on mousedown stops the button from stealing focus
+  // away from the textarea/input. Without this, by the time onClick fires the
+  // textarea has been blurred and selectionStart/End may have been collapsed
+  // — meaning 'B' would just insert ** at the start of the field instead of
+  // wrapping the user's selection.
+  const stopFocusSteal = (e: React.MouseEvent) => e.preventDefault();
   return (
     <div className="flex items-center gap-1">
-      <button type="button" onClick={() => apply('**', '**')} className={cn(btn, 'font-bold')} title="Negrito (**texto**)">
+      <button
+        type="button"
+        onMouseDown={stopFocusSteal}
+        onClick={() => apply('**', '**')}
+        className={cn(btn, 'font-bold')}
+        title="Negrito (**texto**)"
+      >
         B
       </button>
-      <button type="button" onClick={() => apply('*', '*')} className={cn(btn, 'italic')} title="Itálico (*texto*)">
+      <button
+        type="button"
+        onMouseDown={stopFocusSteal}
+        onClick={() => apply('*', '*')}
+        className={cn(btn, 'italic')}
+        title="Itálico (*texto*)"
+      >
         I
       </button>
       <button
         type="button"
+        onMouseDown={stopFocusSteal}
         onClick={() => apply('[', '](https://)')}
         className={btn}
         title="Link ([texto](url))"
