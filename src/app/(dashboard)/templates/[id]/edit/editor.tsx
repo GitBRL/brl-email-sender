@@ -8,11 +8,11 @@ import { kitPalette } from '@/lib/brand-kits';
 const BrandKitContext = createContext<BrandKit | null>(null);
 import {
   Type, Heading1, Image as ImageIcon, MousePointerClick, Minus, Square, Mail, Trash2, ChevronUp, ChevronDown, Eye, Save, GripVertical,
-  Building2, Upload, Link as LinkIcon, X,
+  Building2, Upload, Link as LinkIcon, X, List,
 } from 'lucide-react';
 import {
   type Block, type TemplateDocument, type ButtonBlock, type ImageBlock, type HeaderBlock, type TextBlock,
-  type DividerBlock, type SpacerBlock, type FooterBlock, makeBlock, makeLogo,
+  type DividerBlock, type SpacerBlock, type FooterBlock, type BulletsBlock, makeBlock, makeLogo,
 } from '@/lib/blocks';
 import { saveTemplate, uploadEmailImage } from '../../actions';
 import { cn } from '@/lib/utils';
@@ -26,6 +26,7 @@ type PaletteItem = {
 const PALETTE: PaletteItem[] = [
   { type: 'header',  label: 'Heading',  icon: <Heading1 size={16} /> },
   { type: 'text',    label: 'Text',     icon: <Type size={16} /> },
+  { type: 'bullets', label: 'Bullets',  icon: <List size={16} /> },
   { make: makeLogo,  label: 'Logo',     icon: <Building2 size={16} /> },
   { type: 'image',   label: 'Image',    icon: <ImageIcon size={16} /> },
   { type: 'button',  label: 'Button',   icon: <MousePointerClick size={16} /> },
@@ -489,6 +490,34 @@ function BlockPreview({ block }: { block: Block }) {
           {block.text}
         </div>
       );
+    case 'bullets': {
+      const fontSize = block.font_size ?? 15;
+      const fontWeight = block.bold ? 700 : 400;
+      const fontStyle = block.italic ? 'italic' : 'normal';
+      const ListTag = block.style === 'numbered' ? 'ol' : 'ul';
+      return (
+        <div style={{ padding: '8px 24px', textAlign: block.align }}>
+          <ListTag
+            style={{
+              margin: 0,
+              padding: '0 0 0 24px',
+              color: block.color,
+              fontFamily: PREVIEW_FONT_STACK,
+              fontSize,
+              fontWeight,
+              fontStyle,
+              lineHeight: 1.6,
+            }}
+          >
+            {block.items
+              .filter((s) => s && s.trim() !== '')
+              .map((line, i) => (
+                <li key={i} style={{ margin: '0 0 6px 0' }}>{renderInline(line)}</li>
+              ))}
+          </ListTag>
+        </div>
+      );
+    }
     default:
       return null;
   }
@@ -660,6 +689,61 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
           <p className="text-[10px] text-zinc-500">
             <code>{'{{unsubscribe_url}}'}</code> will be replaced when sending.
           </p>
+        </div>
+      );
+    case 'bullets':
+      return (
+        <div className="space-y-3">
+          <Section title="Lista" />
+          <Field label="Itens — um por linha">
+            <textarea
+              rows={10}
+              value={block.items.join('\n')}
+              onChange={(e) =>
+                onChange({
+                  // Split on every newline so users can keep blank lines as
+                  // a placeholder while editing; empty items are filtered at
+                  // render time.
+                  items: e.target.value.split('\n'),
+                } as Partial<BulletsBlock>)
+              }
+              className={cn(inputCls, 'min-h-[12rem] resize-y leading-relaxed')}
+              placeholder={'Primeiro item\nSegundo item\nTerceiro item'}
+            />
+          </Field>
+          <p className="text-[10px] text-zinc-500 -mt-1">
+            Cada linha vira um item. Suporta <code>**negrito**</code>, <code>*itálico*</code> e <code>[link](url)</code> inline em cada item.
+          </p>
+          <Field label="Estilo">
+            <div className="flex gap-1">
+              {(['bullet', 'numbered'] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => onChange({ style: s } as Partial<BulletsBlock>)}
+                  className={cn(
+                    'flex-1 rounded-md border px-2 py-1.5 text-xs',
+                    block.style === s
+                      ? 'bg-brl-yellow border-brl-yellow text-brl-dark font-semibold'
+                      : 'border-zinc-300 bg-white hover:bg-zinc-50',
+                  )}
+                >
+                  {s === 'bullet' ? '• Bullets' : '1. Numerada'}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <FormattingRow
+            bold={!!block.bold}
+            italic={!!block.italic}
+            fontSize={block.font_size ?? null}
+            defaultFontSize={15}
+            onBold={(v) => onChange({ bold: v } as Partial<BulletsBlock>)}
+            onItalic={(v) => onChange({ italic: v } as Partial<BulletsBlock>)}
+            onFontSize={(v) => onChange({ font_size: v } as Partial<BulletsBlock>)}
+          />
+          <AlignField value={block.align} onChange={(v) => onChange({ align: v } as Partial<BulletsBlock>)} />
+          <ColorField label="Color" value={block.color} onChange={(v) => onChange({ color: v } as Partial<BulletsBlock>)} />
         </div>
       );
     default:

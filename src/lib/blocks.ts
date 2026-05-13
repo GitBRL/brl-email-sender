@@ -71,6 +71,25 @@ export type DividerBlock = BlockBase & { type: 'divider'; color: string };
 export type SpacerBlock = BlockBase & { type: 'spacer'; height: number };
 export type FooterBlock = BlockBase & { type: 'footer'; text: string };
 
+/**
+ * Bulleted or numbered list. Items are stored as a string array so each row
+ * can carry inline markdown (**bold**, *italic*, [text](url)) just like
+ * text/header blocks. Empty items are filtered out at render time.
+ */
+export type BulletsBlock = BlockBase & {
+  type: 'bullets';
+  items: string[];
+  /** 'bullet' renders <ul> with • markers; 'numbered' renders <ol> with 1., 2., ... */
+  style: 'bullet' | 'numbered';
+  align: 'left' | 'center' | 'right';
+  color: string;
+  /** Body copy size in px. Falls back to 15px when undefined. */
+  font_size?: number;
+  /** Whole-block bold / italic. Inline mixed formatting also supported per item. */
+  bold?: boolean;
+  italic?: boolean;
+};
+
 export type Block =
   | HeaderBlock
   | TextBlock
@@ -78,7 +97,8 @@ export type Block =
   | ButtonBlock
   | DividerBlock
   | SpacerBlock
-  | FooterBlock;
+  | FooterBlock
+  | BulletsBlock;
 
 export type TemplateDocument = {
   version: 1;
@@ -141,6 +161,15 @@ export function makeBlock(type: Block['type']): Block {
         id,
         type,
         text: 'BRL Educação · {{unsubscribe_url}}',
+      };
+    case 'bullets':
+      return {
+        id,
+        type,
+        items: ['Primeiro item', 'Segundo item', 'Terceiro item'],
+        style: 'bullet',
+        align: 'left',
+        color: '#2b2b2b',
       };
   }
 }
