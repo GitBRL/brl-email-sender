@@ -156,7 +156,7 @@ export function TemplateEditor({
 
   return (
     <BrandKitContext.Provider value={brandKit}>
-    <div className="h-full grid grid-cols-[200px_1fr_300px]">
+    <div className="h-full grid grid-cols-[200px_1fr_380px]">
       {/* Palette */}
       <aside className="border-r border-zinc-200 bg-white p-3 overflow-y-auto">
         {brandKit && (
@@ -451,10 +451,19 @@ function BlockPreview({ block }: { block: Block }) {
       const align = block.align ?? 'center';
       const margin =
         align === 'left' ? '0 auto 0 0' : align === 'right' ? '0 0 0 auto' : '0 auto';
+      const fit = block.fit ?? 'contain';
+      const sizing: React.CSSProperties = block.height
+        ? { height: block.height, objectFit: fit }
+        : { height: 'auto' };
       // eslint-disable-next-line @next/next/no-img-element
       return (
         <div style={{ padding: '8px 24px', textAlign: align }}>
-          <img src={block.src} alt={block.alt} width={block.width} style={{ display: 'block', maxWidth: '100%', height: 'auto', margin }} />
+          <img
+            src={block.src}
+            alt={block.alt}
+            width={block.width}
+            style={{ display: 'block', maxWidth: '100%', margin, ...sizing }}
+          />
         </div>
       );
     }
@@ -491,15 +500,34 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
       return (
         <div className="space-y-3">
           <Section title="Heading" />
-          <Field label="Text"><textarea rows={2} value={block.text} onChange={(e) => onChange({ text: e.target.value } as Partial<HeaderBlock>)} className={inputCls} /></Field>
+          <Field label="Text">
+            <textarea
+              rows={4}
+              value={block.text}
+              onChange={(e) => onChange({ text: e.target.value } as Partial<HeaderBlock>)}
+              className={cn(inputCls, 'min-h-[5rem] resize-y leading-snug')}
+            />
+          </Field>
           <p className="text-[10px] text-zinc-500 -mt-1">
             Suporta <code>**negrito**</code>, <code>*itálico*</code> e <code>[link](url)</code> inline.
           </p>
           <Field label="Heading level">
-            <select value={block.size} onChange={(e) => onChange({ size: e.target.value as HeaderBlock['size'] } as Partial<HeaderBlock>)} className={inputCls}>
-              <option value="h1">H1 — large</option>
-              <option value="h2">H2 — medium</option>
-              <option value="h3">H3 — small</option>
+            <select
+              value={block.size}
+              onChange={(e) =>
+                // Clear any custom font_size override so the new level's
+                // default size kicks in immediately (otherwise an existing
+                // override would visually freeze the heading at the old size).
+                onChange({
+                  size: e.target.value as HeaderBlock['size'],
+                  font_size: undefined,
+                } as Partial<HeaderBlock>)
+              }
+              className={inputCls}
+            >
+              <option value="h1">H1 — grande (28px)</option>
+              <option value="h2">H2 — médio (22px)</option>
+              <option value="h3">H3 — pequeno (18px)</option>
             </select>
           </Field>
           <FormattingRow
@@ -519,7 +547,14 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
       return (
         <div className="space-y-3">
           <Section title="Text" />
-          <Field label="Content"><textarea rows={5} value={block.text} onChange={(e) => onChange({ text: e.target.value } as Partial<TextBlock>)} className={inputCls} /></Field>
+          <Field label="Content">
+            <textarea
+              rows={12}
+              value={block.text}
+              onChange={(e) => onChange({ text: e.target.value } as Partial<TextBlock>)}
+              className={cn(inputCls, 'min-h-[18rem] resize-y leading-relaxed')}
+            />
+          </Field>
           <p className="text-[10px] text-zinc-500 -mt-1">
             Suporta <code>**negrito**</code>, <code>*itálico*</code>, <code>[link](url)</code> e merge tags <code>{'{{name}}'}</code>.
           </p>
@@ -545,7 +580,46 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
             onChange={(v) => onChange({ src: v } as Partial<ImageBlock>)}
           />
           <Field label="Alt text"><input value={block.alt} onChange={(e) => onChange({ alt: e.target.value } as Partial<ImageBlock>)} className={inputCls} /></Field>
-          <Field label="Width (px)"><input type="number" min={50} max={1200} value={block.width} onChange={(e) => onChange({ width: parseInt(e.target.value, 10) || 600 } as Partial<ImageBlock>)} className={inputCls} /></Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Width (px)">
+              <input
+                type="number" min={50} max={1200}
+                value={block.width}
+                onChange={(e) => onChange({ width: parseInt(e.target.value, 10) || 600 } as Partial<ImageBlock>)}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Height (px) — opcional">
+              <input
+                type="number" min={20} max={1200}
+                value={block.height ?? ''}
+                placeholder="auto"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  onChange({
+                    height: v === '' ? undefined : Math.max(20, Math.min(1200, parseInt(v, 10) || 0)),
+                  } as Partial<ImageBlock>);
+                }}
+                className={inputCls}
+              />
+            </Field>
+          </div>
+          {block.height ? (
+            <Field label="Ajuste (quando height fixo)">
+              <select
+                value={block.fit ?? 'contain'}
+                onChange={(e) => onChange({ fit: e.target.value as 'contain' | 'cover' } as Partial<ImageBlock>)}
+                className={inputCls}
+              >
+                <option value="contain">Contain — mostra a imagem inteira (sem cortar)</option>
+                <option value="cover">Cover — preenche o quadro (pode cortar)</option>
+              </select>
+            </Field>
+          ) : (
+            <p className="text-[10px] text-zinc-500 -mt-1">
+              Sem altura → a imagem mantém a proporção original. Defina altura para travar o tamanho do bloco (ex: 120 para um banner) — assim uma nova imagem fica no mesmo espaço.
+            </p>
+          )}
           <AlignField value={block.align ?? 'center'} onChange={(v) => onChange({ align: v } as Partial<ImageBlock>)} />
           <Field label="Click URL (optional)"><input value={block.href ?? ''} onChange={(e) => onChange({ href: e.target.value } as Partial<ImageBlock>)} className={inputCls} placeholder="https://…" /></Field>
         </div>

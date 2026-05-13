@@ -62,6 +62,8 @@ export function defaultDocForKit(kit: BrandKit): TemplateDocument {
       src: kit.logo_url,
       alt: kit.name,
       width: 180,
+      height: 60,
+      fit: 'contain',
       align: 'center',
     });
   } else {

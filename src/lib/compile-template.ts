@@ -77,7 +77,19 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
     }
     case 'image': {
       const align = b.align ?? 'center';
-      const img = `<img src="${esc(b.src)}" alt="${esc(b.alt)}" width="${b.width}" style="display:block;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;" />`;
+      // When `height` is set we render a fixed-box image: width × height with
+      // object-fit so a freshly-uploaded image of any aspect ratio still fits
+      // the template's original layout. Apple Mail / Gmail honor object-fit;
+      // Outlook ignores it and falls back to width+height (slight stretch in
+      // the unlikely Outlook case is acceptable).
+      // When height is undefined we keep the legacy 'natural aspect ratio'
+      // behaviour (height:auto).
+      const fit = b.fit ?? 'contain';
+      const baseStyle = b.height
+        ? `display:block;max-width:100%;height:${b.height}px;object-fit:${fit};border:0;outline:none;text-decoration:none;`
+        : `display:block;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;`;
+      const heightAttr = b.height ? ` height="${b.height}"` : '';
+      const img = `<img src="${esc(b.src)}" alt="${esc(b.alt)}" width="${b.width}"${heightAttr} style="${baseStyle}" />`;
       const wrapped = b.href ? `<a href="${esc(b.href)}" style="text-decoration:none;">${img}</a>` : img;
       // Email clients need explicit margins for image alignment — they ignore
       // float and inconsistently honor text-align on block images.

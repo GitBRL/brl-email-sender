@@ -44,6 +44,8 @@ const announcementBlocks: Block[] = [
     src: 'https://placehold.co/180x60/2b2b2b/ffcd01?text=BRL+Educa%C3%A7%C3%A3o',
     alt: 'BRL Educação',
     width: 180,
+    height: 60,
+    fit: 'contain',
   },
   { id: b('a-2'), type: 'spacer', height: 28 },
   {
@@ -113,6 +115,8 @@ const promoBlocks: Block[] = [
     src: 'https://placehold.co/600x250/f47216/ffffff?text=Sua+oferta+aqui',
     alt: 'Banner da oferta',
     width: 600,
+    height: 250,
+    fit: 'cover',
   },
   { id: b('p-2'), type: 'spacer', height: 20 },
   {
@@ -210,6 +214,8 @@ const launchBlocks: Block[] = [
     src: 'https://placehold.co/600x360/2b2b2b/ffcd01?text=Imagem+do+produto',
     alt: 'Produto',
     width: 600,
+    height: 360,
+    fit: 'cover',
   },
   { id: b('l-9'), type: 'spacer', height: 32 },
   {

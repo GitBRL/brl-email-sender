@@ -41,9 +41,19 @@ export type ImageBlock = BlockBase & {
   src: string;
   alt: string;
   width: number; // px
+  /** Optional fixed display height (px). When set, the rendered image is
+   *  constrained to a width×height box and the image is sized via object-fit
+   *  so a fresh upload preserves the template's original layout instead of
+   *  stretching tall. When undefined, height is derived from the image's
+   *  intrinsic aspect ratio (the legacy behaviour). */
+  height?: number;
   href?: string;
   /** Horizontal placement within the block's row. Defaults to 'center'. */
   align?: 'left' | 'center' | 'right';
+  /** How to fit the image into a fixed width×height box. 'contain' keeps
+   *  the whole image visible (default — safer for logos), 'cover' fills the
+   *  box and may crop. Only meaningful when height is set. */
+  fit?: 'contain' | 'cover';
 };
 
 export type ButtonBlock = BlockBase & {
