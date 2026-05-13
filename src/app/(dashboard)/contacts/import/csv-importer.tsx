@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { bulkImportContacts } from '../actions';
 import { cleanRows, splitFullName, type RawRow } from '@/lib/contact-cleaning';
+import { cn } from '@/lib/utils';
 
 type StandardKey = 'email' | 'name' | 'phone' | 'company' | 'tag' | 'status';
 type StandardField = {
@@ -111,6 +112,10 @@ type ListAssignment =
   | { kind: 'existing'; id: string }
   | { kind: 'new'; name: string };
 
+/** Tag override applied uniformly to all imported rows. 'keep' means leave
+ *  whatever the per-row tag mapping (or its absence) decided. */
+type TagOverride = 'keep' | 'hot' | 'warm' | 'cold';
+
 export function CsvImporter({
   existingLists = [],
 }: {
@@ -136,6 +141,9 @@ export function CsvImporter({
     kind: 'new',
     name: '',
   });
+  // Tag override — applied uniformly to all imported rows. 'keep' (default)
+  // respects whatever the per-column tag mapping (or its absence) produced.
+  const [tagOverride, setTagOverride] = useState<TagOverride>('keep');
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -203,11 +211,14 @@ export function CsvImporter({
         }
       }
       if (Object.keys(custom).length > 0) out.custom_fields = custom;
+      // Force-tag every row when the operator picked a uniform tag in the
+      // import settings panel. Overwrites any per-row tag from the CSV column.
+      if (tagOverride !== 'keep') out.tag = tagOverride;
       return out;
     });
     const result = cleanRows(mapped);
     return { mapped, ...result };
-  }, [rows, columnMap]);
+  }, [rows, columnMap, tagOverride]);
 
   // Preview = first 3 cleaned rows for the user to eyeball
   const previewRows = cleaned.slice(0, 3);
@@ -634,6 +645,55 @@ export function CsvImporter({
                   </div>
                 </div>
               </label>
+            </div>
+          </div>
+
+          {/* Tag override — applied uniformly to every imported row.
+              Useful when a list represents 'all hot leads from the webinar'
+              and you want all 31 contacts pre-tagged as hot, regardless of
+              what the CSV column (if any) said. */}
+          <div className="bg-white rounded-lg border border-zinc-200 p-6 space-y-3">
+            <h2 className="text-sm font-semibold">Tag dos contatos</h2>
+            <p className="text-xs text-zinc-500 -mt-1">
+              Define o &ldquo;temperatura&rdquo; dos contatos. Ao escolher um valor aqui, todos os contatos importados ficam com essa tag (sobrescreve a coluna CSV mapeada como Tag, se houver).
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {(
+                [
+                  { value: 'keep', label: 'Manter', hint: 'usa coluna CSV ou cold padrão', dot: '#a1a1aa' },
+                  { value: 'hot',  label: 'Hot',    hint: 'leads quentes',                  dot: '#ef4444' },
+                  { value: 'warm', label: 'Warm',   hint: 'engajados',                       dot: '#f59e0b' },
+                  { value: 'cold', label: 'Cold',   hint: 'frios / opt-in genérico',         dot: '#3b82f6' },
+                ] as const
+              ).map((opt) => {
+                const active = tagOverride === opt.value;
+                return (
+                  <label
+                    key={opt.value}
+                    className={cn(
+                      'cursor-pointer rounded-md border-2 p-2.5 text-left transition flex items-start gap-2',
+                      active
+                        ? 'border-brl-yellow bg-brl-yellow/10'
+                        : 'border-zinc-200 bg-white hover:border-zinc-300',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="tag-override"
+                      className="mt-0.5 accent-brl-yellow"
+                      checked={active}
+                      onChange={() => setTagOverride(opt.value)}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium flex items-center gap-1.5">
+                        <span className="inline-block w-2 h-2 rounded-full" style={{ background: opt.dot }} />
+                        {opt.label}
+                      </div>
+                      <div className="text-[10px] text-zinc-500 leading-snug">{opt.hint}</div>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
           </div>
 

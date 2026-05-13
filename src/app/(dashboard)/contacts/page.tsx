@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Plus, Upload, Search } from 'lucide-react';
+import { Plus, Upload, Search, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { BulkSplitButton } from './_bulk-split-button';
 import { createClient } from '@/lib/supabase/server';
 import { requireProfile } from '@/lib/auth';
@@ -11,12 +11,19 @@ import { DeleteContactButton } from './_delete-button';
 
 const PAGE_SIZE = 25;
 
+type SortKey = 'name' | 'last_name' | 'email' | 'company' | 'created_at';
+type SortDir = 'asc' | 'desc';
+
 type Search = {
   tag?: string;
   status?: string;
   q?: string;
   page?: string;
+  sort?: string;
+  dir?: string;
 };
+
+const SORTABLE: ReadonlySet<SortKey> = new Set(['name', 'last_name', 'email', 'company', 'created_at']);
 
 export default async function ContactsPage({
   searchParams,
@@ -40,21 +47,47 @@ export default async function ContactsPage({
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
+  // Sort: defaults to created_at desc (newest first). Clicking a column header
+  // toggles asc/desc or switches sort key. ?sort=name&dir=asc is the canonical
+  // 'A→Z by first name' selector.
+  const sort: SortKey = SORTABLE.has(sp.sort as SortKey) ? (sp.sort as SortKey) : 'created_at';
+  const dir: SortDir = sp.dir === 'asc' ? 'asc' : 'desc';
+
   let query = supabase
     .from('contacts')
     .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false })
+    .order(sort, { ascending: dir === 'asc', nullsFirst: false })
     .range(from, to);
+
+  // Stable secondary sort by id so paging doesn't shuffle rows that share a value.
+  if (sort !== 'created_at') {
+    query = query.order('created_at', { ascending: false });
+  }
 
   if (tag) query = query.eq('tag', tag);
   if (status) query = query.eq('status', status);
-  if (q) query = query.or(`email.ilike.%${q}%,name.ilike.%${q}%,company.ilike.%${q}%`);
+  if (q) query = query.or(`email.ilike.%${q}%,name.ilike.%${q}%,last_name.ilike.%${q}%,company.ilike.%${q}%`);
 
   const { data: contacts, count } = await query;
   const total = count ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const canEdit = profile.role === 'admin' || profile.role === 'editor';
+
+  // Build a query-string helper that preserves filters + page when only
+  // changing the sort key/direction (and resets to page 1 on sort change).
+  function sortHref(key: SortKey): string {
+    const sameKey = sort === key;
+    const nextDir: SortDir = sameKey ? (dir === 'asc' ? 'desc' : 'asc') : key === 'created_at' ? 'desc' : 'asc';
+    const params = new URLSearchParams({
+      ...(tag ? { tag } : {}),
+      ...(status ? { status } : {}),
+      ...(q ? { q } : {}),
+      sort: key,
+      dir: nextDir,
+    });
+    return `?${params.toString()}`;
+  }
 
   return (
     <div className="p-8 max-w-7xl">
@@ -99,12 +132,13 @@ export default async function ContactsPage({
             <table className="w-full text-sm">
               <thead className="text-xs text-zinc-500 uppercase tracking-wide bg-zinc-50">
                 <tr>
-                  <th className="text-left font-medium px-4 py-3">Email</th>
-                  <th className="text-left font-medium px-4 py-3">Name</th>
-                  <th className="text-left font-medium px-4 py-3">Company</th>
+                  <SortHeader label="Email"     active={sort === 'email'}      dir={dir} href={sortHref('email')} />
+                  <SortHeader label="Name"      active={sort === 'name'}       dir={dir} href={sortHref('name')} />
+                  <SortHeader label="Last name" active={sort === 'last_name'}  dir={dir} href={sortHref('last_name')} />
+                  <SortHeader label="Company"   active={sort === 'company'}    dir={dir} href={sortHref('company')} />
                   <th className="text-left font-medium px-4 py-3">Tag</th>
                   <th className="text-left font-medium px-4 py-3">Status</th>
-                  <th className="text-left font-medium px-4 py-3">Added</th>
+                  <SortHeader label="Added"     active={sort === 'created_at'} dir={dir} href={sortHref('created_at')} />
                   <th className="text-right font-medium px-4 py-3">Actions</th>
                 </tr>
               </thead>
@@ -117,6 +151,7 @@ export default async function ContactsPage({
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-zinc-700">{c.name ?? '—'}</td>
+                    <td className="px-4 py-3 text-zinc-700">{c.last_name ?? '—'}</td>
                     <td className="px-4 py-3 text-zinc-700">{c.company ?? '—'}</td>
                     <td className="px-4 py-3">
                       {canEdit ? <TagSelect contactId={c.id} value={c.tag} /> : <span>{c.tag}</span>}
@@ -166,6 +201,8 @@ export default async function ContactsPage({
                   ...(tag ? { tag } : {}),
                   ...(status ? { status } : {}),
                   ...(q ? { q } : {}),
+                  sort,
+                  dir,
                   page: String(page - 1),
                 }).toString()}`}
                 className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 hover:bg-zinc-50"
@@ -179,6 +216,8 @@ export default async function ContactsPage({
                   ...(tag ? { tag } : {}),
                   ...(status ? { status } : {}),
                   ...(q ? { q } : {}),
+                  sort,
+                  dir,
                   page: String(page + 1),
                 }).toString()}`}
                 className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 hover:bg-zinc-50"
@@ -190,5 +229,39 @@ export default async function ContactsPage({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Sortable column header. Shows an arrow when active (↑ asc, ↓ desc) and a
+ * dimmed up-down icon when inactive so users know they can click to sort.
+ */
+function SortHeader({
+  label,
+  active,
+  dir,
+  href,
+}: {
+  label: string;
+  active: boolean;
+  dir: SortDir;
+  href: string;
+}) {
+  return (
+    <th className="text-left font-medium px-4 py-3">
+      <Link
+        href={href}
+        className={`inline-flex items-center gap-1 hover:text-brl-dark transition ${
+          active ? 'text-brl-dark' : 'text-zinc-500'
+        }`}
+      >
+        {label}
+        {active ? (
+          dir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />
+        ) : (
+          <ArrowUpDown size={11} className="opacity-30" />
+        )}
+      </Link>
+    </th>
   );
 }

@@ -26,6 +26,8 @@ export type Contact = {
   id: string;
   email: string;
   name: string | null;
+  /** Surname only. Populated by the CSV importer's "Split Name into First/Last" toggle, or set manually via the contact edit form. Renders in {{last_name}} merge tag. */
+  last_name: string | null;
   phone: string | null;
   company: string | null;
   tag: ContactTag;
