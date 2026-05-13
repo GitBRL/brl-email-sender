@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/auth';
 import type { ContactStatus, ContactTag } from '@/types';
+import { splitFullName } from '@/lib/contact-cleaning';
 
 const ContactInput = z.object({
   email: z.string().email(),
@@ -76,9 +77,15 @@ export type ImportRowInput = {
   custom_fields?: Record<string, string>;
 };
 
+export type ImportListAssignment =
+  | { kind: 'none' }
+  | { kind: 'existing'; id: string }
+  | { kind: 'new'; name: string };
+
 export async function bulkImportContacts(
   rows: ImportRowInput[],
-): Promise<{ ok: boolean; imported: number; skipped: number; errors: string[] }> {
+  listAssignment: ImportListAssignment = { kind: 'none' },
+): Promise<{ ok: boolean; imported: number; skipped: number; errors: string[]; listId?: string; listName?: string }> {
   await requireRole('editor');
   const supabase = await createClient();
 
@@ -141,6 +148,115 @@ export async function bulkImportContacts(
     .upsert(merged, { onConflict: 'email', count: 'exact' });
   if (error) return { ok: false, imported: 0, skipped: rows.length, errors: [...errors, error.message] };
 
+  // ----- List assignment -----
+  // After upsert, optionally tag every imported contact with a list (either
+  // an existing one or a freshly created one). We append the list id to each
+  // contact's `lists` uuid[] column without disturbing other memberships.
+  let listId: string | undefined;
+  let listName: string | undefined;
+  if (listAssignment.kind !== 'none') {
+    if (listAssignment.kind === 'new') {
+      const trimmed = listAssignment.name.trim();
+      if (trimmed) {
+        const { data: created, error: listErr } = await supabase
+          .from('lists')
+          .insert({ name: trimmed })
+          .select('id, name')
+          .single();
+        if (listErr) errors.push(`Falha ao criar lista: ${listErr.message}`);
+        else {
+          listId = created.id;
+          listName = created.name;
+        }
+      }
+    } else if (listAssignment.kind === 'existing') {
+      const { data: found } = await supabase
+        .from('lists')
+        .select('id, name')
+        .eq('id', listAssignment.id)
+        .maybeSingle();
+      if (found) {
+        listId = found.id;
+        listName = found.name;
+      } else {
+        errors.push('Lista existente não encontrada.');
+      }
+    }
+
+    if (listId) {
+      // Fetch current lists arrays so we can append rather than replace.
+      const { data: contactRows } = await supabase
+        .from('contacts')
+        .select('id, lists')
+        .in('email', emails);
+      if (contactRows && contactRows.length > 0) {
+        // Batch updates one-by-one — postgres array ops via Supabase REST
+        // don't have a true "append if missing" primitive, so we patch each.
+        for (const c of contactRows) {
+          const current = (c.lists ?? []) as string[];
+          if (current.includes(listId)) continue;
+          await supabase
+            .from('contacts')
+            .update({ lists: [...current, listId] })
+            .eq('id', c.id);
+        }
+      }
+      revalidatePath('/lists');
+      revalidatePath(`/lists/${listId}`);
+    }
+  }
+
   revalidatePath('/contacts');
-  return { ok: true, imported: count ?? valid.length, skipped: rows.length - valid.length, errors };
+  return {
+    ok: true,
+    imported: count ?? valid.length,
+    skipped: rows.length - valid.length,
+    errors,
+    listId,
+    listName,
+  };
+}
+
+/**
+ * One-shot data fix: for every contact whose `name` contains a space and
+ * whose `last_name` is null, split the full name at the first whitespace and
+ * write back name=first / last_name=rest. Idempotent — re-running won't
+ * change rows already split. Used to backfill data imported before the
+ * "Split full name" toggle existed.
+ */
+export async function bulkSplitExistingNames(): Promise<{
+  ok: boolean;
+  processed: number;
+  skipped: number;
+  error?: string;
+}> {
+  await requireRole('editor');
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('id, name, last_name')
+    .is('last_name', null)
+    .like('name', '% %');
+  if (error) return { ok: false, processed: 0, skipped: 0, error: error.message };
+
+  const rows = data ?? [];
+  let processed = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    const { first, last } = splitFullName(row.name ?? '');
+    if (!first || !last) {
+      skipped++;
+      continue;
+    }
+    const { error: updErr } = await supabase
+      .from('contacts')
+      .update({ name: first, last_name: last })
+      .eq('id', row.id);
+    if (updErr) skipped++;
+    else processed++;
+  }
+
+  revalidatePath('/contacts');
+  return { ok: true, processed, skipped };
 }

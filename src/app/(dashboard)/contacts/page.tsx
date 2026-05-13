@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Plus, Upload, Search } from 'lucide-react';
+import { BulkSplitButton } from './_bulk-split-button';
 import { createClient } from '@/lib/supabase/server';
 import { requireProfile } from '@/lib/auth';
 import { TagSelect } from '@/components/tag-select';
@@ -65,7 +66,8 @@ export default async function ContactsPage({
           </p>
         </div>
         {canEdit && (
-          <div className="flex gap-2">
+          <div className="flex items-start gap-2">
+            <BulkSplitButton />
             <Link
               href="/contacts/import"
               className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium hover:bg-zinc-50"

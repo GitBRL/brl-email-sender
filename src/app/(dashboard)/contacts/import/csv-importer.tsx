@@ -72,6 +72,11 @@ function normalize(s: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
+/** Header normalisations that imply "this is a full name, please split it". */
+const FULL_NAME_HEADERS = new Set([
+  'name', 'nome', 'fullname', 'full_name', 'nome_completo', 'complete_name',
+]);
+
 function autoMap(headers: string[]): Record<string, ColumnMap> {
   const map: Record<string, ColumnMap> = {};
   const usedStandard = new Set<StandardKey>();
@@ -87,7 +92,12 @@ function autoMap(headers: string[]): Record<string, ColumnMap> {
     }
     if (matched) {
       usedStandard.add(matched);
-      map[h] = { mode: 'standard', standardKey: matched };
+      // When the column maps to Name AND the header looks like a full-name
+      // column (not "first_name" / "primeiro_nome"), pre-enable the split
+      // toggle. Users were missing the manual toggle and importing full
+      // names into the single `name` field by accident.
+      const looksLikeFullName = matched === 'name' && FULL_NAME_HEADERS.has(norm);
+      map[h] = { mode: 'standard', standardKey: matched, splitFullName: looksLikeFullName };
     } else {
       // Default unmatched columns to "custom" using the normalized header as the field name.
       map[h] = { mode: 'custom', customName: norm || h };
@@ -96,7 +106,16 @@ function autoMap(headers: string[]): Record<string, ColumnMap> {
   return map;
 }
 
-export function CsvImporter() {
+type ListAssignment =
+  | { kind: 'none' }
+  | { kind: 'existing'; id: string }
+  | { kind: 'new'; name: string };
+
+export function CsvImporter({
+  existingLists = [],
+}: {
+  existingLists?: Array<{ id: string; name: string }>;
+}) {
   const router = useRouter();
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Array<Record<string, string>>>([]);
@@ -106,14 +125,33 @@ export function CsvImporter() {
     imported: number;
     skipped: number;
     errors: string[];
+    listId?: string;
+    listName?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // List assignment — default to "create new" since that's the dominant case
+  // when importing a fresh CSV. The new-list name is auto-suggested from the
+  // file name on upload.
+  const [listAssignment, setListAssignment] = useState<ListAssignment>({
+    kind: 'new',
+    name: '',
+  });
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setError(null);
     setResult(null);
+
+    // Suggest a list name from the filename (e.g. "alunos-2026.csv" → "alunos-2026")
+    setListAssignment((prev) => {
+      if (prev.kind === 'new' && !prev.name) {
+        const stem = file.name.replace(/\.csv$/i, '').trim();
+        if (stem) return { kind: 'new', name: stem };
+      }
+      return prev;
+    });
+
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
@@ -210,15 +248,29 @@ export function CsvImporter() {
       setError('No valid rows after cleaning. Check the report below.');
       return;
     }
+    if (listAssignment.kind === 'new' && !listAssignment.name.trim()) {
+      setError('Digite um nome para a nova lista (ou escolha outra opção).');
+      return;
+    }
+    if (listAssignment.kind === 'existing' && !listAssignment.id) {
+      setError('Escolha uma lista existente (ou outra opção).');
+      return;
+    }
 
     start(async () => {
-      const res = await bulkImportContacts(cleaned);
-      setResult({ imported: res.imported, skipped: res.skipped, errors: res.errors });
+      const res = await bulkImportContacts(cleaned, listAssignment);
+      setResult({
+        imported: res.imported,
+        skipped: res.skipped,
+        errors: res.errors,
+        listId: res.listId,
+        listName: res.listName,
+      });
       if (res.ok && res.errors.length === 0) {
         setTimeout(() => {
           router.push('/contacts');
           router.refresh();
-        }, 1500);
+        }, 1800);
       }
     });
   }
@@ -233,6 +285,11 @@ export function CsvImporter() {
             Imported {result.imported} contact{result.imported === 1 ? '' : 's'}
           </h2>
         </div>
+        {result.listName && (
+          <p className="text-sm text-zinc-700">
+            Adicionados à lista <strong>{result.listName}</strong>.
+          </p>
+        )}
         {result.skipped > 0 && (
           <p className="text-sm text-zinc-600">
             Skipped {result.skipped} row{result.skipped === 1 ? '' : 's'}.
@@ -462,6 +519,124 @@ export function CsvImporter() {
             )}
           </div>
 
+          {/* List assignment — decide where the imported contacts land.
+              Default is "create a new list" with the file name as suggestion,
+              because that's what most users expect when importing fresh data. */}
+          <div className="bg-white rounded-lg border border-zinc-200 p-6 space-y-3">
+            <h2 className="text-sm font-semibold">Salvar em uma lista</h2>
+            <p className="text-xs text-zinc-500 -mt-1">
+              Os contatos importados vão para o pool geral. Opcionalmente, agrupe-os em uma lista para usar no público da campanha.
+            </p>
+
+            <div className="space-y-2">
+              {/* New list option (default) */}
+              <label className="flex items-start gap-2 p-2.5 rounded-md border-2 cursor-pointer transition"
+                style={{
+                  borderColor: listAssignment.kind === 'new' ? '#ffcd01' : '#e4e4e7',
+                  background: listAssignment.kind === 'new' ? 'rgba(255,205,1,0.06)' : '#fff',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="list-assignment"
+                  className="mt-1 accent-brl-yellow"
+                  checked={listAssignment.kind === 'new'}
+                  onChange={() =>
+                    setListAssignment((prev) =>
+                      prev.kind === 'new' ? prev : { kind: 'new', name: '' },
+                    )
+                  }
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">Criar lista nova</div>
+                  <div className="text-[11px] text-zinc-500 mb-1.5">
+                    Cria uma lista com esse nome e adiciona todos os contatos importados.
+                  </div>
+                  <input
+                    type="text"
+                    value={listAssignment.kind === 'new' ? listAssignment.name : ''}
+                    onChange={(e) =>
+                      setListAssignment({ kind: 'new', name: e.target.value })
+                    }
+                    onFocus={() =>
+                      setListAssignment((prev) =>
+                        prev.kind === 'new' ? prev : { kind: 'new', name: '' },
+                      )
+                    }
+                    placeholder="ex. Alunos Salus 2026"
+                    className="w-full rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm outline-none focus:border-brl-dark"
+                    disabled={listAssignment.kind !== 'new'}
+                  />
+                </div>
+              </label>
+
+              {/* Existing list option */}
+              <label className="flex items-start gap-2 p-2.5 rounded-md border-2 cursor-pointer transition"
+                style={{
+                  borderColor: listAssignment.kind === 'existing' ? '#ffcd01' : '#e4e4e7',
+                  background: listAssignment.kind === 'existing' ? 'rgba(255,205,1,0.06)' : '#fff',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="list-assignment"
+                  className="mt-1 accent-brl-yellow"
+                  checked={listAssignment.kind === 'existing'}
+                  onChange={() => setListAssignment({ kind: 'existing', id: '' })}
+                  disabled={existingLists.length === 0}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">
+                    Adicionar a uma lista existente
+                    {existingLists.length === 0 && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-400">(nenhuma)</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-zinc-500 mb-1.5">
+                    Os contatos serão adicionados sem remover quem já está na lista.
+                  </div>
+                  <select
+                    value={listAssignment.kind === 'existing' ? listAssignment.id : ''}
+                    onChange={(e) =>
+                      setListAssignment({ kind: 'existing', id: e.target.value })
+                    }
+                    disabled={listAssignment.kind !== 'existing' || existingLists.length === 0}
+                    className="w-full rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm outline-none focus:border-brl-dark bg-white"
+                  >
+                    <option value="">— Escolha uma lista —</option>
+                    {existingLists.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
+
+              {/* None option */}
+              <label className="flex items-start gap-2 p-2.5 rounded-md border-2 cursor-pointer transition"
+                style={{
+                  borderColor: listAssignment.kind === 'none' ? '#ffcd01' : '#e4e4e7',
+                  background: listAssignment.kind === 'none' ? 'rgba(255,205,1,0.06)' : '#fff',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="list-assignment"
+                  className="mt-1 accent-brl-yellow"
+                  checked={listAssignment.kind === 'none'}
+                  onChange={() => setListAssignment({ kind: 'none' })}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">Não adicionar a uma lista</div>
+                  <div className="text-[11px] text-zinc-500">
+                    Os contatos ficam apenas no pool geral. Você poderá agrupá-los depois.
+                  </div>
+                </div>
+              </label>
+            </div>
+          </div>
+
           <div className="flex justify-end">
             <button
               type="button"
@@ -471,7 +646,7 @@ export function CsvImporter() {
             >
               {pending
                 ? 'Importing…'
-                : `Import ${cleaned.length.toLocaleString('pt-BR')} cleaned row${cleaned.length === 1 ? '' : 's'}`}
+                : `Importar ${cleaned.length.toLocaleString('pt-BR')} contato${cleaned.length === 1 ? '' : 's'}`}
             </button>
           </div>
         </>
