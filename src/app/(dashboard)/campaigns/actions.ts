@@ -151,7 +151,7 @@ export async function getCampaignPreviewHtml(
 
   const { data: campaign } = await supabase
     .from('campaigns')
-    .select('subject, template_id')
+    .select('subject, template_id, list_ids, filter_tag')
     .eq('id', campaignId)
     .maybeSingle();
   if (!campaign) return { ok: false, error: 'Campaign not found' };
@@ -165,14 +165,29 @@ export async function getCampaignPreviewHtml(
   if (!template?.html_content) return { ok: false, error: 'Template HTML is empty' };
 
   const prepared = prepareCampaignHtml(template.html_content, campaignId);
+
+  // Same trick as sendTestEmail: borrow the first matching contact's data
+  // so the preview shows realistic merge-tag values. Falls back to a generic
+  // 'Maria Silva' placeholder when the campaign has no audience yet.
+  let q = supabase
+    .from('contacts')
+    .select('id, email, name, last_name, phone, company, custom_fields')
+    .eq('status', 'subscribed');
+  if (campaign.filter_tag) q = q.eq('tag', campaign.filter_tag);
+  if ((campaign.list_ids ?? []).length > 0) {
+    q = q.overlaps('lists', campaign.list_ids);
+  }
+  const { data: firstRows } = await q.order('created_at', { ascending: true }).limit(1);
+  const first = firstRows?.[0] ?? null;
+
   const sample = {
     id: 'preview-recipient',
-    email: 'preview@brleducacao.com.br',
-    name: 'Maria',
-    last_name: 'Silva',
-    phone: null,
-    company: null,
-    custom_fields: null,
+    email: first?.email ?? 'preview@brleducacao.com.br',
+    name: first?.name ?? 'Maria',
+    last_name: first?.last_name ?? 'Silva',
+    phone: first?.phone ?? null,
+    company: first?.company ?? null,
+    custom_fields: first?.custom_fields ?? null,
   };
   const html = personalize(prepared.html, sample);
   const subject = personalizeSubject(campaign.subject ?? '', sample);
@@ -200,7 +215,7 @@ export async function sendTestEmail(
 
   const { data: campaign } = await supabase
     .from('campaigns')
-    .select('subject, template_id, from_name, from_email, reply_to')
+    .select('subject, template_id, from_name, from_email, reply_to, list_ids, filter_tag')
     .eq('id', campaignId)
     .maybeSingle();
   if (!campaign) return { ok: false, error: 'Campaign not found.' };
@@ -214,14 +229,33 @@ export async function sendTestEmail(
   if (!template?.html_content) return { ok: false, error: 'Template HTML is empty.' };
 
   const prepared = prepareCampaignHtml(template.html_content, campaignId);
+
+  // Pull the first contact in the campaign's audience to use as the merge-tag
+  // source — so {{name}} / {{first_name}} / {{last_name}} / custom fields all
+  // render exactly like they will for a real recipient instead of a literal
+  // "Teste". The actual delivery still goes to `trimmed` (the operator's test
+  // address); we just borrow another contact's PII for personalisation.
+  let firstQuery = supabase
+    .from('contacts')
+    .select('id, email, name, last_name, phone, company, custom_fields')
+    .eq('status', 'subscribed');
+  if (campaign.filter_tag) firstQuery = firstQuery.eq('tag', campaign.filter_tag);
+  if ((campaign.list_ids ?? []).length > 0) {
+    firstQuery = firstQuery.overlaps('lists', campaign.list_ids);
+  }
+  const { data: firstContactRows } = await firstQuery
+    .order('created_at', { ascending: true })
+    .limit(1);
+  const firstContact = firstContactRows?.[0] ?? null;
+
   const sample = {
     id: 'test-recipient',
-    email: trimmed,
-    name: 'Teste',
-    last_name: 'Sobrenome',
-    phone: null,
-    company: null,
-    custom_fields: null,
+    email: trimmed, // delivery target stays the operator's test address
+    name: firstContact?.name ?? 'Teste',
+    last_name: firstContact?.last_name ?? null,
+    phone: firstContact?.phone ?? null,
+    company: firstContact?.company ?? null,
+    custom_fields: firstContact?.custom_fields ?? null,
   };
   const html = personalize(prepared.html, sample);
   const subject = `[TESTE] ${personalizeSubject(campaign.subject ?? '', sample)}`;
