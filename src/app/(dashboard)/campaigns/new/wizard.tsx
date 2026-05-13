@@ -157,13 +157,15 @@ export function Wizard({
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
   const [recipientSample, setRecipientSample] = useState<string[]>([]);
 
-  // Refresh recipient preview when audience changes (in step 4). If the
-  // server action throws (e.g. stale action id from an older deploy), surface
-  // a friendly error in the wizard's error box instead of silently leaving
-  // the count at 0 — which is what was making the user think 'no recipients'
-  // when the underlying query would actually have returned 31.
+  // Refresh recipient preview when audience changes. Runs on the Audience
+  // step (so the user sees the live count as they pick lists/tags) AND on
+  // the Review step (last-chance verification before sending). If the server
+  // action throws (e.g. stale action id from an older deploy), surface a
+  // friendly error in the wizard's error box instead of silently leaving
+  // the count at 0 — which was making the user think 'no recipients' when
+  // the underlying query would actually have returned 31.
   useEffect(() => {
-    if (step !== 'Review') return;
+    if (step !== 'Review' && step !== 'Audience') return;
     let cancelled = false;
     previewRecipients(listIds, (filterTag || null) as ContactTag | null)
       .then((r) => {
@@ -588,10 +590,42 @@ export function Wizard({
                 Sem lista e sem tag = envia para todos os contatos com status &ldquo;subscribed&rdquo;.
               </p>
             </div>
+
+            {/* Live recipient counter — re-runs whenever lists or tag change so
+                the user sees exactly how many people will receive the email
+                without having to click through to Review. */}
+            <div className="rounded-md bg-brl-yellow/10 border border-brl-yellow/40 p-4 flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-brl-dark/60">Destinatários</div>
+                <div className="text-2xl font-bold mt-0.5">
+                  {recipientCount === null
+                    ? '—'
+                    : recipientCount.toLocaleString('pt-BR')}
+                </div>
+                {recipientSample.length > 0 && (
+                  <div className="text-[11px] text-zinc-600 mt-1 truncate max-w-md">
+                    ex. {recipientSample.slice(0, 3).join(', ')}
+                    {recipientSample.length > 3 ? '…' : ''}
+                  </div>
+                )}
+              </div>
+              <div className="text-[11px] text-zinc-500 text-right max-w-[180px]">
+                Atualiza automaticamente conforme você muda lista ou tag.
+              </div>
+            </div>
+
             {error && <ErrorBox>{error}</ErrorBox>}
             <Footer>
               <button type="button" onClick={() => setStep('Edit')} className={secondaryBtn}>← Voltar</button>
-              <button type="button" disabled={pending} onClick={gotoReview} className={primaryBtn}>{pending ? 'Salvando…' : 'Continuar →'}</button>
+              <button
+                type="button"
+                disabled={pending || !recipientCount}
+                onClick={gotoReview}
+                className={primaryBtn}
+                title={!recipientCount ? 'Sem destinatários — ajuste a lista ou tag' : undefined}
+              >
+                {pending ? 'Salvando…' : 'Continuar →'}
+              </button>
             </Footer>
           </div>
         )}
