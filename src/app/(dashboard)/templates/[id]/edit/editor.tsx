@@ -12,8 +12,17 @@ import {
 } from 'lucide-react';
 import {
   type Block, type TemplateDocument, type ButtonBlock, type ImageBlock, type HeaderBlock, type TextBlock,
-  type DividerBlock, type SpacerBlock, type FooterBlock, type BulletsBlock, makeBlock, makeLogo,
+  type DividerBlock, type SpacerBlock, type FooterBlock, type BulletsBlock, makeBlock, makeLogo, DEFAULT_PADDING,
 } from '@/lib/blocks';
+
+/** Mirrors the pad() helper in compile-template.ts so the editor preview
+ *  matches the sent email's padding exactly. */
+function previewPad(b: { padding_top?: number; padding_bottom?: number }, type: string): string {
+  const def = DEFAULT_PADDING[type] ?? { top: 8, bottom: 8 };
+  const top = b.padding_top ?? def.top;
+  const bottom = b.padding_bottom ?? def.bottom;
+  return `${top}px 24px ${bottom}px 24px`;
+}
 import { saveTemplate, uploadEmailImage } from '../../actions';
 import { cn } from '@/lib/utils';
 
@@ -425,7 +434,7 @@ function BlockPreview({ block }: { block: Block }) {
       const fontWeight = block.bold === false ? 600 : 700;
       const fontStyle = block.italic ? 'italic' : 'normal';
       return (
-        <div style={{ padding: '8px 24px', textAlign: block.align }}>
+        <div style={{ padding: previewPad(block, 'header'), textAlign: block.align }}>
           <T style={{ margin: 0, color: block.color, fontFamily: PREVIEW_FONT_STACK, fontSize, fontWeight, fontStyle, lineHeight: 1.25 }}>
             {renderInline(block.text)}
           </T>
@@ -437,7 +446,7 @@ function BlockPreview({ block }: { block: Block }) {
       const fontWeight = block.bold ? 700 : 400;
       const fontStyle = block.italic ? 'italic' : 'normal';
       return (
-        <div style={{ padding: '8px 24px', textAlign: block.align }}>
+        <div style={{ padding: previewPad(block, 'text'), textAlign: block.align }}>
           <p style={{ margin: 0, color: block.color, fontFamily: PREVIEW_FONT_STACK, fontSize, fontWeight, fontStyle, lineHeight: 1.6 }}>
             {renderInline(block.text)}
           </p>
@@ -458,7 +467,7 @@ function BlockPreview({ block }: { block: Block }) {
         : { height: 'auto' };
       // eslint-disable-next-line @next/next/no-img-element
       return (
-        <div style={{ padding: '8px 24px', textAlign: align }}>
+        <div style={{ padding: previewPad(block, 'image'), textAlign: align }}>
           <img
             src={block.src}
             alt={block.alt}
@@ -470,7 +479,7 @@ function BlockPreview({ block }: { block: Block }) {
     }
     case 'button':
       return (
-        <div style={{ padding: '16px 24px', textAlign: block.align }}>
+        <div style={{ padding: previewPad(block, 'button'), textAlign: block.align }}>
           <span style={{ display: 'inline-block', background: block.background, color: block.color, padding: '12px 22px', borderRadius: 6, fontFamily: PREVIEW_FONT_STACK, fontWeight: 600, fontSize: 14 }}>
             {block.text}
           </span>
@@ -478,7 +487,7 @@ function BlockPreview({ block }: { block: Block }) {
       );
     case 'divider':
       return (
-        <div style={{ padding: '12px 24px' }}>
+        <div style={{ padding: previewPad(block, 'divider') }}>
           <div style={{ height: 1, background: block.color }} />
         </div>
       );
@@ -486,7 +495,7 @@ function BlockPreview({ block }: { block: Block }) {
       return <div style={{ height: block.height }} />;
     case 'footer':
       return (
-        <div style={{ padding: 24, textAlign: 'center', color: '#999', fontFamily: PREVIEW_FONT_STACK, fontSize: 12 }}>
+        <div style={{ padding: previewPad(block, 'footer'), textAlign: 'center', color: '#999', fontFamily: PREVIEW_FONT_STACK, fontSize: 12 }}>
           {block.text}
         </div>
       );
@@ -496,7 +505,7 @@ function BlockPreview({ block }: { block: Block }) {
       const fontStyle = block.italic ? 'italic' : 'normal';
       const ListTag = block.style === 'numbered' ? 'ol' : 'ul';
       return (
-        <div style={{ padding: '8px 24px', textAlign: block.align }}>
+        <div style={{ padding: previewPad(block, 'bullets'), textAlign: block.align }}>
           <ListTag
             style={{
               margin: 0,
@@ -574,6 +583,13 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
           />
           <AlignField value={block.align} onChange={(v) => onChange({ align: v } as Partial<HeaderBlock>)} />
           <ColorField label="Color" value={block.color} onChange={(v) => onChange({ color: v } as Partial<HeaderBlock>)} />
+          <SpacingRow
+            type="header"
+            paddingTop={block.padding_top}
+            paddingBottom={block.padding_bottom}
+            onTop={(v) => onChange({ padding_top: v } as Partial<HeaderBlock>)}
+            onBottom={(v) => onChange({ padding_bottom: v } as Partial<HeaderBlock>)}
+          />
         </div>
       );
     case 'text':
@@ -601,6 +617,13 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
           />
           <AlignField value={block.align} onChange={(v) => onChange({ align: v } as Partial<TextBlock>)} />
           <ColorField label="Color" value={block.color} onChange={(v) => onChange({ color: v } as Partial<TextBlock>)} />
+          <SpacingRow
+            type="text"
+            paddingTop={block.padding_top}
+            paddingBottom={block.padding_bottom}
+            onTop={(v) => onChange({ padding_top: v } as Partial<TextBlock>)}
+            onBottom={(v) => onChange({ padding_bottom: v } as Partial<TextBlock>)}
+          />
         </div>
       );
     case 'image':
@@ -654,6 +677,13 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
           )}
           <AlignField value={block.align ?? 'center'} onChange={(v) => onChange({ align: v } as Partial<ImageBlock>)} />
           <Field label="Click URL (optional)"><input value={block.href ?? ''} onChange={(e) => onChange({ href: e.target.value } as Partial<ImageBlock>)} className={inputCls} placeholder="https://…" /></Field>
+          <SpacingRow
+            type="image"
+            paddingTop={block.padding_top}
+            paddingBottom={block.padding_bottom}
+            onTop={(v) => onChange({ padding_top: v } as Partial<ImageBlock>)}
+            onBottom={(v) => onChange({ padding_bottom: v } as Partial<ImageBlock>)}
+          />
         </div>
       );
     case 'button':
@@ -665,6 +695,13 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
           <ColorField label="Background" value={block.background} onChange={(v) => onChange({ background: v } as Partial<ButtonBlock>)} />
           <ColorField label="Text color" value={block.color} onChange={(v) => onChange({ color: v } as Partial<ButtonBlock>)} />
           <AlignField value={block.align} onChange={(v) => onChange({ align: v } as Partial<ButtonBlock>)} />
+          <SpacingRow
+            type="button"
+            paddingTop={block.padding_top}
+            paddingBottom={block.padding_bottom}
+            onTop={(v) => onChange({ padding_top: v } as Partial<ButtonBlock>)}
+            onBottom={(v) => onChange({ padding_bottom: v } as Partial<ButtonBlock>)}
+          />
           <p className="text-[10px] text-zinc-500">
             link_id: <code className="break-all">{block.link_id}</code>
           </p>
@@ -675,6 +712,13 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
         <div className="space-y-3">
           <Section title="Divider" />
           <ColorField label="Color" value={block.color} onChange={(v) => onChange({ color: v } as Partial<DividerBlock>)} />
+          <SpacingRow
+            type="divider"
+            paddingTop={block.padding_top}
+            paddingBottom={block.padding_bottom}
+            onTop={(v) => onChange({ padding_top: v } as Partial<DividerBlock>)}
+            onBottom={(v) => onChange({ padding_bottom: v } as Partial<DividerBlock>)}
+          />
         </div>
       );
     case 'spacer':
@@ -692,6 +736,13 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
           <p className="text-[10px] text-zinc-500">
             <code>{'{{unsubscribe_url}}'}</code> will be replaced when sending.
           </p>
+          <SpacingRow
+            type="footer"
+            paddingTop={block.padding_top}
+            paddingBottom={block.padding_bottom}
+            onTop={(v) => onChange({ padding_top: v } as Partial<FooterBlock>)}
+            onBottom={(v) => onChange({ padding_bottom: v } as Partial<FooterBlock>)}
+          />
         </div>
       );
     case 'bullets':
@@ -736,6 +787,13 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
           />
           <AlignField value={block.align} onChange={(v) => onChange({ align: v } as Partial<BulletsBlock>)} />
           <ColorField label="Color" value={block.color} onChange={(v) => onChange({ color: v } as Partial<BulletsBlock>)} />
+          <SpacingRow
+            type="bullets"
+            paddingTop={block.padding_top}
+            paddingBottom={block.padding_bottom}
+            onTop={(v) => onChange({ padding_top: v } as Partial<BulletsBlock>)}
+            onBottom={(v) => onChange({ padding_bottom: v } as Partial<BulletsBlock>)}
+          />
         </div>
       );
     default:
@@ -1110,6 +1168,75 @@ function ImageUploader({ value, onChange }: { value: string; onChange: (v: strin
  * `defaultFontSize` is shown as the placeholder in the size input so the
  * user can see what value will be used when the override field is empty.
  */
+/**
+ * Padding above + below the block (in px). Both fields show their default
+ * value as the placeholder so the user can see the fallback when blank.
+ * Empty input clears the override and reverts to the type default.
+ */
+function SpacingRow({
+  type,
+  paddingTop,
+  paddingBottom,
+  onTop,
+  onBottom,
+}: {
+  type: string;
+  paddingTop: number | undefined;
+  paddingBottom: number | undefined;
+  onTop: (v: number | undefined) => void;
+  onBottom: (v: number | undefined) => void;
+}) {
+  const def = DEFAULT_PADDING[type] ?? { top: 8, bottom: 8 };
+  return (
+    <Field label="Espaçamento (px)">
+      <div className="flex items-center gap-2">
+        <PaddingInput
+          label="↑ Acima"
+          value={paddingTop}
+          placeholder={def.top}
+          onChange={onTop}
+        />
+        <PaddingInput
+          label="↓ Abaixo"
+          value={paddingBottom}
+          placeholder={def.bottom}
+          onChange={onBottom}
+        />
+      </div>
+    </Field>
+  );
+}
+
+function PaddingInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: number | undefined;
+  placeholder: number;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <label className="flex-1 flex items-center gap-1.5 text-[10px] text-zinc-500">
+      <span className="shrink-0">{label}</span>
+      <input
+        type="number"
+        min={0}
+        max={200}
+        value={value ?? ''}
+        placeholder={String(placeholder)}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange(v === '' ? undefined : Math.max(0, Math.min(200, parseInt(v, 10) || 0)));
+        }}
+        className="flex-1 min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-800 outline-none focus:border-brl-dark"
+      />
+    </label>
+  );
+}
+
 function FormattingRow({
   bold,
   italic,

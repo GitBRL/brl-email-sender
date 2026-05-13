@@ -7,7 +7,27 @@
  * for the heatmap overlay.
  */
 
-export type BlockBase = { id: string };
+export type BlockBase = {
+  id: string;
+  /** Optional override for the block's top padding in px (the gap to whatever
+   *  block sits above). When undefined, the block's type-specific default is
+   *  used (header/text 8px, button 16px, divider 12px, footer 24px, etc.). */
+  padding_top?: number;
+  /** Same as padding_top but for the bottom edge. */
+  padding_bottom?: number;
+};
+
+/** Default vertical padding (px) per block type. Mirrored in compile-template
+ *  and the editor preview so what-you-see matches the sent email exactly. */
+export const DEFAULT_PADDING: Record<string, { top: number; bottom: number }> = {
+  header: { top: 8, bottom: 8 },
+  text: { top: 8, bottom: 8 },
+  image: { top: 8, bottom: 8 },
+  button: { top: 16, bottom: 16 },
+  divider: { top: 12, bottom: 12 },
+  footer: { top: 24, bottom: 24 },
+  bullets: { top: 8, bottom: 8 },
+};
 
 export type HeaderBlock = BlockBase & {
   type: 'header';

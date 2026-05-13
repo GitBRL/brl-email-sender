@@ -6,7 +6,16 @@
  * the campaign send pipeline so we can swap each link for a tracked redirect).
  */
 
-import type { Block, TemplateDocument } from './blocks';
+import { DEFAULT_PADDING, type Block, type TemplateDocument } from './blocks';
+
+/** Resolve effective top/bottom padding for a block, honoring overrides. */
+function pad(b: { padding_top?: number; padding_bottom?: number }, type: string): { top: number; bottom: number } {
+  const def = DEFAULT_PADDING[type] ?? { top: 8, bottom: 8 };
+  return {
+    top: b.padding_top ?? def.top,
+    bottom: b.padding_bottom ?? def.bottom,
+  };
+}
 
 /** Font stack for all rendered blocks. Sora is loaded via Google Fonts in the
  *  email <head>; the rest is fallback for clients that strip web fonts. */
@@ -63,7 +72,8 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
       const size = b.font_size ?? HEADING_SIZES[b.size];
       const weight = b.bold === false ? 600 : 700; // headers are bold by default
       const style = b.italic ? ';font-style:italic' : '';
-      return `<tr><td style="padding:8px 24px;text-align:${b.align};">
+      const p = pad(b, 'header');
+      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;text-align:${b.align};">
         <${tag} style="margin:0;color:${b.color};font-family:${EMAIL_FONT_STACK};font-size:${size}px;font-weight:${weight};line-height:1.25${style};">${inlineFormat(b.text)}</${tag}>
       </td></tr>`;
     }
@@ -71,7 +81,8 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
       const size = b.font_size ?? DEFAULT_TEXT_SIZE;
       const weight = b.bold ? 700 : 400;
       const fontStyle = b.italic ? 'italic' : 'normal';
-      return `<tr><td style="padding:8px 24px;text-align:${b.align};">
+      const p = pad(b, 'text');
+      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;text-align:${b.align};">
         <p style="margin:0;color:${b.color};font-family:${EMAIL_FONT_STACK};font-size:${size}px;font-weight:${weight};font-style:${fontStyle};line-height:1.6;">${inlineFormat(b.text)}</p>
       </td></tr>`;
     }
@@ -99,22 +110,28 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
         'style="display:block;',
         `style="display:block;margin:${margin};`,
       );
-      return `<tr><td style="padding:8px 24px;text-align:${align};">${sized}</td></tr>`;
+      const p = pad(b, 'image');
+      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;text-align:${align};">${sized}</td></tr>`;
     }
     case 'button': {
+      const p = pad(b, 'button');
       // Use data-link-id so we can find buttons in the rendered HTML for tracking + heatmap positioning.
-      return `<tr><td style="padding:16px 24px;text-align:${b.align};">
+      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;text-align:${b.align};">
         <a href="${esc(b.href)}" data-link-id="${b.link_id}" style="display:inline-block;background:${b.background};color:${b.color};padding:12px 22px;border-radius:6px;font-family:${EMAIL_FONT_STACK};font-weight:600;text-decoration:none;font-size:14px;">${esc(b.text)}</a>
       </td></tr>`;
     }
-    case 'divider':
-      return `<tr><td style="padding:12px 24px;">
+    case 'divider': {
+      const p = pad(b, 'divider');
+      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;">
         <div style="height:1px;background:${b.color};line-height:1px;font-size:1px;">&nbsp;</div>
       </td></tr>`;
+    }
     case 'spacer':
       return `<tr><td style="height:${b.height}px;line-height:${b.height}px;font-size:1px;">&nbsp;</td></tr>`;
-    case 'footer':
-      return `<tr><td style="padding:24px;text-align:center;color:#999;font-family:${EMAIL_FONT_STACK};font-size:12px;line-height:1.5;">${inlineFormat(b.text)}</td></tr>`;
+    case 'footer': {
+      const p = pad(b, 'footer');
+      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;text-align:center;color:#999;font-family:${EMAIL_FONT_STACK};font-size:12px;line-height:1.5;">${inlineFormat(b.text)}</td></tr>`;
+    }
     case 'bullets': {
       const size = b.font_size ?? DEFAULT_TEXT_SIZE;
       const weight = b.bold ? 700 : 400;
@@ -131,7 +148,8 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
       // Explicit list-style + padding-left so markers show. Some email clients
       // (notably Gmail's mobile webapp) reset list-style to none on injected
       // HTML; declaring it inline keeps the bullets visible everywhere.
-      return `<tr><td style="padding:8px 24px;text-align:${b.align};">
+      const p = pad(b, 'bullets');
+      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;text-align:${b.align};">
         <${tag} style="margin:0;padding:0 0 0 24px;list-style:${listStyle};list-style-position:outside;color:${b.color};font-family:${EMAIL_FONT_STACK};font-size:${size}px;font-weight:${weight};font-style:${fontStyle};line-height:1.6;">${items}</${tag}>
       </td></tr>`;
     }
