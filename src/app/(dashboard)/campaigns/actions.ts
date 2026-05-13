@@ -14,6 +14,63 @@ import { uid, type Block, type ButtonBlock, type TemplateDocument } from '@/lib/
 
 export type ActionState = { ok: boolean; error?: string; id?: string; sent?: number; failed?: number };
 
+/**
+ * Load a draft campaign so the wizard can resume editing from where the
+ * user left off. Returns everything the wizard needs to repopulate state +
+ * pick the correct starting step. Refuses anything except status='draft' —
+ * sent / sending campaigns are not editable.
+ */
+export async function getCampaignForResume(
+  id: string,
+): Promise<
+  | {
+      ok: true;
+      campaign: {
+        id: string;
+        name: string | null;
+        subject: string | null;
+        from_name: string | null;
+        from_email: string | null;
+        reply_to: string | null;
+        template_id: string | null;
+        brand_kit_id: string | null;
+        list_ids: string[];
+        filter_tag: ContactTag | null;
+      };
+    }
+  | { ok: false; error: string }
+> {
+  await requireRole('editor');
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from('campaigns')
+    .select(
+      'id, name, subject, from_name, from_email, reply_to, template_id, brand_kit_id, list_ids, filter_tag, status',
+    )
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: 'Campaign not found.' };
+  if (data.status !== 'draft') {
+    return { ok: false, error: `Campaign is "${data.status}" — only drafts can be edited.` };
+  }
+  return {
+    ok: true,
+    campaign: {
+      id: data.id,
+      name: data.name,
+      subject: data.subject,
+      from_name: data.from_name,
+      from_email: data.from_email,
+      reply_to: data.reply_to,
+      template_id: data.template_id,
+      brand_kit_id: data.brand_kit_id,
+      list_ids: (data.list_ids ?? []) as string[],
+      filter_tag: data.filter_tag as ContactTag | null,
+    },
+  };
+}
+
 const Settings = z.object({
   name: z.string().trim().min(1).max(160),
   subject: z.string().trim().min(1).max(200),

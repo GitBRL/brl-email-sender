@@ -60,6 +60,10 @@ export function TemplateEditor({
   const [error, setError] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [isStarter, setIsStarter] = useState(initialIsStarter);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  // Bumping this forces the preview iframe to re-fetch the preview HTML after
+  // we re-open (since the same URL won't reload without a cache-buster).
+  const [previewKey, setPreviewKey] = useState(0);
 
   const selected = doc.blocks.find((b) => b.id === selectedId) ?? null;
 
@@ -118,8 +122,14 @@ export function TemplateEditor({
   }
 
   function preview() {
+    // Save first so the preview iframe reads the latest html_content, then
+    // open the in-page modal. The 400ms delay gives the save round-trip
+    // time to finish before the preview iframe refetches.
     save();
-    setTimeout(() => window.open(`/templates/${templateId}/preview`, '_blank'), 400);
+    setTimeout(() => {
+      setPreviewKey((k) => k + 1);
+      setPreviewOpen(true);
+    }, 400);
   }
 
   return (
@@ -271,6 +281,44 @@ export function TemplateEditor({
         )}
       </aside>
     </div>
+
+    {/* Preview modal — iframes /templates/[id]/preview in the same page.
+        Click backdrop or Esc to close. Re-keys on every open() so the iframe
+        re-fetches the freshly-saved html_content. */}
+    {previewOpen && (
+      <div
+        className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
+        onClick={(e) => e.target === e.currentTarget && setPreviewOpen(false)}
+        onKeyDown={(e) => e.key === 'Escape' && setPreviewOpen(false)}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90dvh] flex flex-col overflow-hidden">
+          <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 shrink-0">
+            <div className="flex items-center gap-2 text-sm">
+              <Eye size={14} className="text-zinc-500" />
+              <span className="font-medium">Preview do email</span>
+              <span className="text-zinc-400 text-xs">(como será enviado)</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPreviewOpen(false)}
+              className="text-zinc-500 hover:text-zinc-900 w-8 h-8 grid place-items-center rounded"
+              aria-label="Fechar preview"
+            >
+              <X size={18} />
+            </button>
+          </header>
+          <iframe
+            key={previewKey}
+            src={`/templates/${templateId}/preview`}
+            title="Preview do template"
+            className="block flex-1 w-full bg-zinc-50"
+            sandbox="allow-same-origin"
+          />
+        </div>
+      </div>
+    )}
     </BrandKitContext.Provider>
   );
 }

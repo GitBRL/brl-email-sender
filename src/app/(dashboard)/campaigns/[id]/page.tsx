@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ChevronLeft, Download } from 'lucide-react';
+import { ChevronLeft, Download, Pencil } from 'lucide-react';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireProfile } from '@/lib/auth';
 import { pct } from '@/lib/utils';
@@ -215,6 +215,15 @@ export default async function CampaignDetailPage({
             >
               <Download size={14} /> Export CSV
             </a>
+          )}
+          {canEdit && campaign.status === 'draft' && (
+            <Link
+              href={`/campaigns/new?id=${campaign.id}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-3 py-1.5 text-sm hover:bg-brl-yellow-hover"
+              title="Continuar a edição deste rascunho no wizard"
+            >
+              <Pencil size={14} /> Continuar edição
+            </Link>
           )}
           {canEdit && campaign.status === 'draft' && <SendNowButton id={campaign.id} />}
           <CampaignRowActions id={campaign.id} name={campaign.name} canDelete={canDelete} />

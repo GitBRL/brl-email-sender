@@ -98,7 +98,13 @@ export default async function CampaignsPage() {
                 return (
                   <tr key={c.id} className="hover:bg-zinc-50">
                     <td className="px-4 py-3">
-                      <Link href={`/campaigns/${c.id}`} className="font-medium hover:underline">
+                      {/* For drafts, clicking the name jumps directly back into
+                          the wizard so the user can continue. For other states
+                          we go to the analytics detail page. */}
+                      <Link
+                        href={c.status === 'draft' ? `/campaigns/new?id=${c.id}` : `/campaigns/${c.id}`}
+                        className="font-medium hover:underline"
+                      >
                         {c.name}
                       </Link>
                       <div className="text-xs text-zinc-500 truncate max-w-md">{c.subject}</div>

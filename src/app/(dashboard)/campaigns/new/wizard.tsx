@@ -30,6 +30,36 @@ function starterIcon(id: string) {
   return Sparkles;
 }
 
+/** Snapshot passed from page.tsx to hydrate the wizard for an in-progress draft. */
+export type ResumeData = {
+  id: string;
+  name: string;
+  subject: string;
+  fromName: string;
+  fromEmail: string;
+  replyTo: string;
+  templateId: string | null;
+  brandKitId: string | null;
+  listIds: string[];
+  filterTag: ContactTag | '';
+};
+
+/** Decide which step the wizard should start on for a resumed draft.
+ *  - No kit yet → Kit
+ *  - Kit but missing name or subject → Settings
+ *  - Settings done, no template → Template
+ *  - Template picked → Edit (always — user may want to keep editing)
+ *  - If they've already passed Edit and have lists/tag → still drop to Edit
+ *    so they can re-verify the template; one extra "Continuar" click is fine.
+ */
+function initialStepFor(r: ResumeData | null): Step {
+  if (!r) return 'Kit';
+  if (!r.brandKitId) return 'Kit';
+  if (!r.name?.trim() || !r.subject?.trim()) return 'Settings';
+  if (!r.templateId) return 'Template';
+  return 'Edit';
+}
+
 export function Wizard({
   templates,
   lists,
@@ -37,6 +67,7 @@ export function Wizard({
   starters,
   defaultFromName,
   defaultFromEmail,
+  resume,
 }: {
   templates: Template[];
   lists: List[];
@@ -44,21 +75,24 @@ export function Wizard({
   starters: StarterMeta[];
   defaultFromName: string;
   defaultFromEmail: string;
+  /** When supplied, the wizard hydrates from this snapshot and starts on the
+   *  step the user was last on (best-effort: see initialStepFor). */
+  resume: ResumeData | null;
 }) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>('Kit');
+  const [step, setStep] = useState<Step>(() => initialStepFor(resume));
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  // Form state
-  const [campaignId, setCampaignId] = useState<string | null>(null);
-  const [brandKitId, setBrandKitId] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [subject, setSubject] = useState('');
-  const [fromName, setFromName] = useState(defaultFromName);
-  const [fromEmail, setFromEmail] = useState(defaultFromEmail);
-  const [replyTo, setReplyTo] = useState('');
-  const [templateId, setTemplateId] = useState<string | null>(null);
+  // Form state — populated from resume snapshot when present.
+  const [campaignId, setCampaignId] = useState<string | null>(resume?.id ?? null);
+  const [brandKitId, setBrandKitId] = useState<string | null>(resume?.brandKitId ?? null);
+  const [name, setName] = useState(resume?.name ?? '');
+  const [subject, setSubject] = useState(resume?.subject ?? '');
+  const [fromName, setFromName] = useState(resume?.fromName ?? defaultFromName);
+  const [fromEmail, setFromEmail] = useState(resume?.fromEmail ?? defaultFromEmail);
+  const [replyTo, setReplyTo] = useState(resume?.replyTo ?? '');
+  const [templateId, setTemplateId] = useState<string | null>(resume?.templateId ?? null);
   const [starterId, setStarterId] = useState<string | null>(null);
   // After useStarterForCampaign clones a starter we keep the resulting template
   // id here so the Edit/Review steps can deep-link to /templates/<id>/edit and
@@ -66,8 +100,8 @@ export function Wizard({
   const [clonedTemplateId, setClonedTemplateId] = useState<string | null>(null);
   const effectiveTemplateId = templateId ?? clonedTemplateId;
 
-  const [listIds, setListIds] = useState<string[]>([]);
-  const [filterTag, setFilterTag] = useState<ContactTag | ''>('');
+  const [listIds, setListIds] = useState<string[]>(resume?.listIds ?? []);
+  const [filterTag, setFilterTag] = useState<ContactTag | ''>(resume?.filterTag ?? '');
 
   // Live preview state (used by Edit + Review steps)
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
