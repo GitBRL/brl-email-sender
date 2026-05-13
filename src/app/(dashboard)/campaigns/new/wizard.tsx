@@ -283,7 +283,30 @@ export function Wizard({
 
   return (
     <div>
-      <Stepper current={step} />
+      <Stepper
+        current={step}
+        onSelect={(s) => {
+          // Backward navigation never needs persistence — the campaign is
+          // already saved at every forward transition. Just switch view.
+          setError(null);
+          setStep(s);
+        }}
+        isAccessible={(s) => {
+          // Always allow jumping to a step that's already been visited
+          // (i.e. its index is <= current index). For forward jumps require
+          // the right prerequisites to be in place.
+          const targetIdx = STEPS.indexOf(s);
+          const currentIdx = STEPS.indexOf(step);
+          if (targetIdx <= currentIdx) return true;
+          // Forward gates — same logic the wizard uses internally
+          if (s === 'Settings') return !!brandKitId;
+          if (s === 'Template') return !!campaignId && !!name.trim() && !!subject.trim();
+          if (s === 'Edit') return !!effectiveTemplateId;
+          if (s === 'Audience') return !!effectiveTemplateId;
+          if (s === 'Review') return !!effectiveTemplateId;
+          return false;
+        }}
+      />
 
       <div className="bg-white rounded-lg border border-zinc-200 p-6">
         {step === 'Kit' && (
@@ -807,7 +830,18 @@ export function Wizard({
   );
 }
 
-function Stepper({ current }: { current: Step }) {
+function Stepper({
+  current,
+  onSelect,
+  isAccessible,
+}: {
+  current: Step;
+  onSelect: (step: Step) => void;
+  /** Decides whether the user can jump to a given step. Always-true for steps
+   *  before/equal to the current one (back navigation), gated by prerequisites
+   *  for steps ahead (e.g. can't jump to Edit without a template). */
+  isAccessible: (step: Step) => boolean;
+}) {
   const idx = STEPS.indexOf(current);
   const ICONS = [Palette, Settings, FileText, Pencil, Users, Send];
   return (
@@ -816,17 +850,53 @@ function Stepper({ current }: { current: Step }) {
         const Icon = ICONS[i];
         const done = i < idx;
         const active = i === idx;
-        return (
-          <li key={s} className="flex items-center flex-1">
+        const enabled = isAccessible(s) && !active;
+        const label = (
+          <>
             <span
               className={cn(
-                'w-7 h-7 rounded-full grid place-items-center shrink-0',
-                done ? 'bg-brl-yellow text-brl-dark' : active ? 'bg-brl-dark text-white' : 'bg-zinc-200 text-zinc-500',
+                'w-7 h-7 rounded-full grid place-items-center shrink-0 transition',
+                done
+                  ? 'bg-brl-yellow text-brl-dark'
+                  : active
+                    ? 'bg-brl-dark text-white'
+                    : enabled
+                      ? 'bg-zinc-200 text-zinc-600 group-hover:bg-zinc-300'
+                      : 'bg-zinc-200 text-zinc-400',
               )}
             >
               {done ? <Check size={14} /> : <Icon size={14} />}
             </span>
-            <span className={cn('ml-2 mr-3 font-medium', active ? 'text-brl-dark' : 'text-zinc-500')}>{s}</span>
+            <span
+              className={cn(
+                'ml-2 mr-3 font-medium transition',
+                active
+                  ? 'text-brl-dark'
+                  : enabled
+                    ? 'text-zinc-600 group-hover:text-brl-dark'
+                    : 'text-zinc-400',
+              )}
+            >
+              {s}
+            </span>
+          </>
+        );
+        return (
+          <li key={s} className="flex items-center flex-1">
+            {enabled ? (
+              <button
+                type="button"
+                onClick={() => onSelect(s)}
+                className="group flex items-center cursor-pointer"
+                aria-label={`Ir para etapa ${s}`}
+              >
+                {label}
+              </button>
+            ) : (
+              <span className="flex items-center" aria-current={active ? 'step' : undefined}>
+                {label}
+              </span>
+            )}
             {i < STEPS.length - 1 && <span className={cn('flex-1 h-px', i < idx ? 'bg-brl-yellow' : 'bg-zinc-200')} />}
           </li>
         );

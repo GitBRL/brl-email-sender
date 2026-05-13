@@ -174,10 +174,13 @@ export function compileTemplate(doc: TemplateDocument): string {
   </style>
 </head>
 <body style="margin:0;padding:0;background:${doc.background};font-family:${EMAIL_FONT_STACK};">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${doc.background};">
+  <!--[if mso]>
+  <style>table,td,div,p,h1,h2,h3,ul,ol,li{mso-line-height-rule:exactly;}</style>
+  <![endif]-->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${doc.background};border-collapse:collapse;border-spacing:0;mso-table-lspace:0pt;mso-table-rspace:0pt;">
     <tr>
       <td align="center" style="padding:24px 12px;">
-        <table role="presentation" width="${doc.width}" cellpadding="0" cellspacing="0" border="0" style="max-width:100%;background:${doc.contentBackground};border-radius:8px;overflow:hidden;">
+        <table role="presentation" width="${doc.width}" cellpadding="0" cellspacing="0" border="0" style="max-width:100%;background:${doc.contentBackground};border-radius:8px;overflow:hidden;border-collapse:collapse;border-spacing:0;mso-table-lspace:0pt;mso-table-rspace:0pt;">
           ${inner}
         </table>
       </td>
