@@ -15,6 +15,12 @@ export type HeaderBlock = BlockBase & {
   align: 'left' | 'center' | 'right';
   size: 'h1' | 'h2' | 'h3';
   color: string;
+  /** Override the default font-size for the heading level. Falls back to the
+   *  h1/h2/h3 default sizes when undefined. */
+  font_size?: number;
+  /** Override the default font-weight (normally 700 for headers). */
+  bold?: boolean;
+  italic?: boolean;
 };
 
 export type TextBlock = BlockBase & {
@@ -22,6 +28,12 @@ export type TextBlock = BlockBase & {
   text: string;
   align: 'left' | 'center' | 'right';
   color: string;
+  /** Body copy size in px. Falls back to 15px when undefined. */
+  font_size?: number;
+  /** Whole-block bold / italic. Inline mixed formatting is also supported via
+   *  markdown-ish syntax in the text itself: **bold** and *italic*. */
+  bold?: boolean;
+  italic?: boolean;
 };
 
 export type ImageBlock = BlockBase & {
