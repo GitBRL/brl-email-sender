@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireProfile } from '@/lib/auth';
+import { HeatmapOverlay, type HeatmapLink } from './_overlay';
 
 export default async function HeatmapPage({
   params,
@@ -105,20 +106,26 @@ export default async function HeatmapPage({
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Heatmap viewer */}
+          {/* Heatmap viewer — iframe of the email + canvas overlay with
+              radial gradient hotspots scaled to click intensity */}
           <div className="lg:col-span-2 bg-white rounded-lg border border-zinc-200 overflow-hidden">
-            <div className="px-4 py-2 border-b border-zinc-100 text-xs text-zinc-500 flex items-center justify-between">
-              <span>Email preview with click badges</span>
-              <span className="text-[10px]">
-                Highlighted background = relative click density
+            <div className="px-4 py-2 border-b border-zinc-100 text-xs text-zinc-500 flex items-center justify-between gap-3">
+              <span>Email preview with click hotspots</span>
+              <span className="inline-flex items-center gap-1.5 text-[10px]">
+                Densidade:
+                <span
+                  className="inline-block w-16 h-2 rounded"
+                  style={{
+                    background:
+                      'linear-gradient(to right, rgba(255,220,0,0.4), rgba(255,120,0,0.7), rgba(255,0,0,0.85))',
+                  }}
+                />
+                <span className="text-zinc-400">baixa → alta</span>
               </span>
             </div>
-            <iframe
-              srcDoc={documentHtml}
-              title="Email heatmap"
-              sandbox="allow-same-origin"
-              className="w-full bg-white"
-              style={{ height: '70vh', minHeight: 600 }}
+            <HeatmapOverlay
+              documentHtml={documentHtml}
+              links={ranked.map<HeatmapLink>(([linkId, info]) => ({ id: linkId, clicks: info.clicks }))}
             />
           </div>
 
