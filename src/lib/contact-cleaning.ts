@@ -18,12 +18,35 @@
 export type RawRow = {
   email?: string;
   name?: string;
+  last_name?: string;
   phone?: string;
   company?: string;
   tag?: string;
   status?: string;
   custom_fields?: Record<string, string>;
 };
+
+/**
+ * Split a full name at the first whitespace into (first, last).
+ *  - "Maria Silva"           → { first: "Maria",  last: "Silva" }
+ *  - "Maria das Graças Lima" → { first: "Maria",  last: "das Graças Lima" }
+ *  - "Madonna"               → { first: "Madonna", last: undefined }
+ *  - "  "                    → { first: undefined, last: undefined }
+ *
+ * Used by the CSV importer when the user toggles "Split Name into First/Last"
+ * on a single Name column. Leading/trailing whitespace stripped on both sides.
+ */
+export function splitFullName(full: string | undefined | null): { first?: string; last?: string } {
+  if (!full) return {};
+  const trimmed = full.trim();
+  if (!trimmed) return {};
+  const idx = trimmed.search(/\s/);
+  if (idx === -1) return { first: trimmed };
+  return {
+    first: trimmed.slice(0, idx).trim(),
+    last: trimmed.slice(idx + 1).trim() || undefined,
+  };
+}
 
 export type CleanRow = RawRow & {
   email: string; // post-clean, always set (rows without email are dropped)

@@ -111,7 +111,8 @@ export async function getCampaignPreviewHtml(
   const sample = {
     id: 'preview-recipient',
     email: 'preview@brleducacao.com.br',
-    name: 'Maria Silva',
+    name: 'Maria',
+    last_name: 'Silva',
     phone: null,
     company: null,
     custom_fields: null,
@@ -160,6 +161,7 @@ export async function sendTestEmail(
     id: 'test-recipient',
     email: trimmed,
     name: 'Teste',
+    last_name: 'Sobrenome',
     phone: null,
     company: null,
     custom_fields: null,
@@ -344,7 +346,7 @@ export async function sendCampaign(id: string): Promise<ActionState> {
   // Resolve recipients (include phone/company/custom_fields so they can be used as merge tags)
   let recipientsQuery = supabase
     .from('contacts')
-    .select('id, email, name, phone, company, custom_fields')
+    .select('id, email, name, last_name, phone, company, custom_fields')
     .eq('status', 'subscribed');
   if (campaign.filter_tag) recipientsQuery = recipientsQuery.eq('tag', campaign.filter_tag);
   if ((campaign.list_ids ?? []).length > 0)

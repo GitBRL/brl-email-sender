@@ -12,7 +12,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { bulkImportContacts } from '../actions';
-import { cleanRows, type RawRow } from '@/lib/contact-cleaning';
+import { cleanRows, splitFullName, type RawRow } from '@/lib/contact-cleaning';
 
 type StandardKey = 'email' | 'name' | 'phone' | 'company' | 'tag' | 'status';
 type StandardField = {
@@ -54,6 +54,13 @@ type ColumnMap = {
   standardKey?: StandardKey;
   /** When mode=custom, what to call the field (becomes a {{merge_tag}}). */
   customName?: string;
+  /**
+   * Only meaningful when standardKey='name'. When true, split the value at the
+   * first whitespace; the first token goes into `name` (first name), the rest
+   * goes into a new `last_name` field. Lets users import a single "Full Name"
+   * CSV column and still personalize with `{{first_name}}` + `{{last_name}}`.
+   */
+  splitFullName?: boolean;
 };
 
 function normalize(s: string): string {
@@ -143,8 +150,19 @@ export function CsvImporter() {
       for (const [csvCol, m] of Object.entries(columnMap)) {
         const val = r[csvCol] ?? '';
         if (!val) continue;
-        if (m.mode === 'standard' && m.standardKey) out[m.standardKey] = val;
-        else if (m.mode === 'custom' && m.customName) custom[m.customName] = val;
+        if (m.mode === 'standard' && m.standardKey) {
+          // Special case: split a single Name column into first/last when
+          // the user toggled the option in the mapping UI.
+          if (m.standardKey === 'name' && m.splitFullName) {
+            const { first, last } = splitFullName(val);
+            if (first) out.name = first;
+            if (last) out.last_name = last;
+          } else {
+            out[m.standardKey] = val;
+          }
+        } else if (m.mode === 'custom' && m.customName) {
+          custom[m.customName] = val;
+        }
       }
       if (Object.keys(custom).length > 0) out.custom_fields = custom;
       return out;
@@ -317,23 +335,49 @@ export function CsvImporter() {
                     {/* Mode-specific input */}
                     <div className="col-span-5">
                       {m.mode === 'standard' && (
-                        <select
-                          value={m.standardKey ?? ''}
-                          onChange={(e) => setStandardKey(csvCol, e.target.value as StandardKey)}
-                          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm"
-                        >
-                          {STANDARD_FIELDS.map((f) => {
-                            const taken = usedStandardKeys.has(f.key) && m.standardKey !== f.key;
-                            return (
-                              <option key={f.key} value={f.key} disabled={taken}>
-                                {f.label}
-                                {f.required ? ' *' : ''}
-                                {taken ? ' (already mapped)' : ''}
-                                {f.hint ? ` — ${f.hint}` : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
+                        <div className="space-y-1.5">
+                          <select
+                            value={m.standardKey ?? ''}
+                            onChange={(e) => setStandardKey(csvCol, e.target.value as StandardKey)}
+                            className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm"
+                          >
+                            {STANDARD_FIELDS.map((f) => {
+                              const taken = usedStandardKeys.has(f.key) && m.standardKey !== f.key;
+                              return (
+                                <option key={f.key} value={f.key} disabled={taken}>
+                                  {f.label}
+                                  {f.required ? ' *' : ''}
+                                  {taken ? ' (already mapped)' : ''}
+                                  {f.hint ? ` — ${f.hint}` : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          {/* Split toggle — only appears when this column is mapped to Name.
+                              On the user's request: turning this on means the first word of
+                              each value lands in `name`, the rest in `last_name`. */}
+                          {m.standardKey === 'name' && (
+                            <label className="flex items-start gap-2 text-[11px] text-zinc-600 cursor-pointer pl-1">
+                              <input
+                                type="checkbox"
+                                checked={!!m.splitFullName}
+                                onChange={(e) =>
+                                  setColumnMap((prev) => ({
+                                    ...prev,
+                                    [csvCol]: { ...prev[csvCol], splitFullName: e.target.checked },
+                                  }))
+                                }
+                                className="mt-0.5 accent-brl-yellow"
+                              />
+                              <span>
+                                <strong className="font-semibold text-zinc-800">Dividir em Nome + Sobrenome</strong>
+                                <span className="block text-zinc-500">
+                                  Tudo antes do primeiro espaço vira <code>{'{{name}}'}</code>; o resto vira <code>{'{{last_name}}'}</code>.
+                                </span>
+                              </span>
+                            </label>
+                          )}
+                        </div>
                       )}
                       {m.mode === 'custom' && (
                         <div className="flex items-center gap-1.5">
@@ -385,7 +429,7 @@ export function CsvImporter() {
                     className="border border-zinc-200 rounded p-3 text-xs space-y-1.5"
                   >
                     <div className="font-mono text-zinc-500">Row {i + 1}</div>
-                    {(['email', 'name', 'phone', 'company', 'tag', 'status'] as const).map(
+                    {(['email', 'name', 'last_name', 'phone', 'company', 'tag', 'status'] as const).map(
                       (k) =>
                         row[k] ? (
                           <div key={k} className="flex gap-2">

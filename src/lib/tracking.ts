@@ -76,6 +76,7 @@ type ContactForMerge = {
   id: string;
   email: string;
   name: string | null;
+  last_name?: string | null;
   phone?: string | null;
   company?: string | null;
   custom_fields?: unknown;
@@ -98,6 +99,11 @@ function buildMergeMap(contact: ContactForMerge): Record<string, string> {
     }
   }
   map.name = contact.name ?? '';
+  // {{first_name}} is an explicit alias for whatever's in `name`. When the
+  // CSV importer's "Split full name" toggle is used, `name` already contains
+  // just the first name; {{first_name}} is the natural template tag to use.
+  map.first_name = contact.name ?? '';
+  map.last_name = contact.last_name ?? '';
   map.email = contact.email;
   if (contact.phone != null) map.phone = contact.phone;
   if (contact.company != null) map.company = contact.company;

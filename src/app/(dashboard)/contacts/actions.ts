@@ -9,6 +9,7 @@ import type { ContactStatus, ContactTag } from '@/types';
 const ContactInput = z.object({
   email: z.string().email(),
   name: z.string().trim().optional().or(z.literal('')).transform((v) => v || null),
+  last_name: z.string().trim().optional().or(z.literal('')).transform((v) => v || null),
   phone: z.string().trim().optional().or(z.literal('')).transform((v) => v || null),
   company: z.string().trim().optional().or(z.literal('')).transform((v) => v || null),
   tag: z.enum(['hot', 'warm', 'cold']).default('cold'),
@@ -61,12 +62,13 @@ export async function deleteContact(id: string): Promise<ActionState> {
 }
 
 /** Reserved keys that the importer treats as standard contact columns, not custom fields. */
-const STANDARD_KEYS = new Set(['email', 'name', 'phone', 'company', 'tag', 'status']);
+const STANDARD_KEYS = new Set(['email', 'name', 'last_name', 'phone', 'company', 'tag', 'status']);
 
 /** A single row coming from the importer. Standard fields live at top-level, custom fields nested. */
 export type ImportRowInput = {
   email?: string;
   name?: string;
+  last_name?: string;
   phone?: string;
   company?: string;
   tag?: string;
@@ -89,6 +91,7 @@ export async function bulkImportContacts(
     const parsed = ContactInput.safeParse({
       email: row.email?.trim().toLowerCase(),
       name: row.name?.trim() || '',
+      last_name: row.last_name?.trim() || '',
       phone: row.phone?.trim() || '',
       company: row.company?.trim() || '',
       tag: (row.tag?.trim().toLowerCase() as ContactTag) || 'cold',
