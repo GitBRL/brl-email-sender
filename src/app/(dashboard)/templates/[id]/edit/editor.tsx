@@ -493,12 +493,27 @@ function BlockPreview({ block }: { block: Block }) {
       );
     case 'spacer':
       return <div style={{ height: block.height }} />;
-    case 'footer':
+    case 'footer': {
+      const fontSize = block.font_size ?? 12;
+      const fontWeight = block.bold ? 700 : 400;
+      const fontStyle = block.italic ? 'italic' : 'normal';
       return (
-        <div style={{ padding: previewPad(block, 'footer'), textAlign: 'center', color: '#999', fontFamily: PREVIEW_FONT_STACK, fontSize: 12 }}>
-          {block.text}
+        <div
+          style={{
+            padding: previewPad(block, 'footer'),
+            textAlign: block.align ?? 'center',
+            color: block.color ?? '#999999',
+            fontFamily: PREVIEW_FONT_STACK,
+            fontSize,
+            fontWeight,
+            fontStyle,
+            lineHeight: 1.5,
+          }}
+        >
+          {renderInline(block.text)}
         </div>
       );
+    }
     case 'bullets': {
       const fontSize = block.font_size ?? 15;
       const fontWeight = block.bold ? 700 : 400;
@@ -732,10 +747,34 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
       return (
         <div className="space-y-3">
           <Section title="Footer" />
-          <Field label="Text"><textarea rows={3} value={block.text} onChange={(e) => onChange({ text: e.target.value } as Partial<FooterBlock>)} className={inputCls} /></Field>
-          <p className="text-[10px] text-zinc-500">
-            <code>{'{{unsubscribe_url}}'}</code> will be replaced when sending.
+          <FormattedTextarea
+            label="Text"
+            rows={4}
+            minClass="min-h-[6rem]"
+            value={block.text}
+            onChange={(v) => onChange({ text: v } as Partial<FooterBlock>)}
+          />
+          <p className="text-[10px] text-zinc-500 -mt-1">
+            Selecione um trecho e use <strong>B</strong>/<strong>I</strong>/🔗. <code>{'{{unsubscribe_url}}'}</code> é substituído no envio.
           </p>
+          <FormattingRow
+            bold={!!block.bold}
+            italic={!!block.italic}
+            fontSize={block.font_size ?? null}
+            defaultFontSize={12}
+            onBold={(v) => onChange({ bold: v } as Partial<FooterBlock>)}
+            onItalic={(v) => onChange({ italic: v } as Partial<FooterBlock>)}
+            onFontSize={(v) => onChange({ font_size: v } as Partial<FooterBlock>)}
+          />
+          <AlignField
+            value={block.align ?? 'center'}
+            onChange={(v) => onChange({ align: v } as Partial<FooterBlock>)}
+          />
+          <ColorField
+            label="Color"
+            value={block.color ?? '#999999'}
+            onChange={(v) => onChange({ color: v } as Partial<FooterBlock>)}
+          />
           <SpacingRow
             type="footer"
             paddingTop={block.padding_top}

@@ -130,7 +130,12 @@ function renderBlock(b: Block, _doc: TemplateDocument): string {
       return `<tr><td style="height:${b.height}px;line-height:${b.height}px;font-size:1px;">&nbsp;</td></tr>`;
     case 'footer': {
       const p = pad(b, 'footer');
-      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;text-align:center;color:#999;font-family:${EMAIL_FONT_STACK};font-size:12px;line-height:1.5;">${inlineFormat(b.text)}</td></tr>`;
+      const align = b.align ?? 'center';
+      const color = b.color ?? '#999999';
+      const size = b.font_size ?? 12;
+      const weight = b.bold ? 700 : 400;
+      const fontStyle = b.italic ? 'italic' : 'normal';
+      return `<tr><td style="padding:${p.top}px 24px ${p.bottom}px 24px;text-align:${align};color:${color};font-family:${EMAIL_FONT_STACK};font-size:${size}px;font-weight:${weight};font-style:${fontStyle};line-height:1.5;">${inlineFormat(b.text)}</td></tr>`;
     }
     case 'bullets': {
       const size = b.font_size ?? DEFAULT_TEXT_SIZE;

@@ -89,7 +89,18 @@ export type ButtonBlock = BlockBase & {
 
 export type DividerBlock = BlockBase & { type: 'divider'; color: string };
 export type SpacerBlock = BlockBase & { type: 'spacer'; height: number };
-export type FooterBlock = BlockBase & { type: 'footer'; text: string };
+export type FooterBlock = BlockBase & {
+  type: 'footer';
+  text: string;
+  /** Text alignment. Defaults to 'center' (the legacy behaviour). */
+  align?: 'left' | 'center' | 'right';
+  /** Footer text color. Defaults to muted grey '#999999' when unset. */
+  color?: string;
+  /** Body font size in px. Defaults to 12px. */
+  font_size?: number;
+  bold?: boolean;
+  italic?: boolean;
+};
 
 /**
  * Bulleted or numbered list. Items are stored as a string array so each row
