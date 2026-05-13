@@ -529,16 +529,15 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
       return (
         <div className="space-y-3">
           <Section title="Heading" />
-          <Field label="Text">
-            <textarea
-              rows={4}
-              value={block.text}
-              onChange={(e) => onChange({ text: e.target.value } as Partial<HeaderBlock>)}
-              className={cn(inputCls, 'min-h-[5rem] resize-y leading-snug')}
-            />
-          </Field>
+          <FormattedTextarea
+            label="Text"
+            rows={4}
+            minClass="min-h-[5rem]"
+            value={block.text}
+            onChange={(v) => onChange({ text: v } as Partial<HeaderBlock>)}
+          />
           <p className="text-[10px] text-zinc-500 -mt-1">
-            Suporta <code>**negrito**</code>, <code>*itálico*</code> e <code>[link](url)</code> inline.
+            Selecione um trecho e clique <strong>B</strong>/<strong>I</strong>/🔗 para formatar parte do texto.
           </p>
           <Field label="Heading level">
             <select
@@ -576,16 +575,15 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
       return (
         <div className="space-y-3">
           <Section title="Text" />
-          <Field label="Content">
-            <textarea
-              rows={12}
-              value={block.text}
-              onChange={(e) => onChange({ text: e.target.value } as Partial<TextBlock>)}
-              className={cn(inputCls, 'min-h-[18rem] resize-y leading-relaxed')}
-            />
-          </Field>
+          <FormattedTextarea
+            label="Content"
+            rows={12}
+            minClass="min-h-[18rem]"
+            value={block.text}
+            onChange={(v) => onChange({ text: v } as Partial<TextBlock>)}
+          />
           <p className="text-[10px] text-zinc-500 -mt-1">
-            Suporta <code>**negrito**</code>, <code>*itálico*</code>, <code>[link](url)</code> e merge tags <code>{'{{name}}'}</code>.
+            Selecione um trecho e clique <strong>B</strong>/<strong>I</strong>/🔗 — ou digite <code>{'{{name}}'}</code> para merge tag.
           </p>
           <FormattingRow
             bold={!!block.bold}
@@ -695,25 +693,6 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
       return (
         <div className="space-y-3">
           <Section title="Lista" />
-          <Field label="Itens — um por linha">
-            <textarea
-              rows={10}
-              value={block.items.join('\n')}
-              onChange={(e) =>
-                onChange({
-                  // Split on every newline so users can keep blank lines as
-                  // a placeholder while editing; empty items are filtered at
-                  // render time.
-                  items: e.target.value.split('\n'),
-                } as Partial<BulletsBlock>)
-              }
-              className={cn(inputCls, 'min-h-[12rem] resize-y leading-relaxed')}
-              placeholder={'Primeiro item\nSegundo item\nTerceiro item'}
-            />
-          </Field>
-          <p className="text-[10px] text-zinc-500 -mt-1">
-            Cada linha vira um item. Suporta <code>**negrito**</code>, <code>*itálico*</code> e <code>[link](url)</code> inline em cada item.
-          </p>
           <Field label="Estilo">
             <div className="flex gap-1">
               {(['bullet', 'numbered'] as const).map((s) => (
@@ -733,6 +712,14 @@ function BlockProperties({ block, onChange }: { block: Block; onChange: (patch: 
               ))}
             </div>
           </Field>
+          <BulletsItemsEditor
+            items={block.items}
+            style={block.style}
+            onChange={(items) => onChange({ items } as Partial<BulletsBlock>)}
+          />
+          <p className="text-[10px] text-zinc-500">
+            Selecione um trecho e use <strong>B</strong> / <strong>I</strong> / 🔗 acima do item, ou digite <code>**negrito**</code> / <code>*itálico*</code> / <code>[texto](url)</code> direto.
+          </p>
           <FormattingRow
             bold={!!block.bold}
             italic={!!block.italic}
@@ -771,6 +758,230 @@ function Section({ title }: { title: string }) {
  * wants one (e.g. an external CDN). Uploads go through the uploadEmailImage
  * server action and the resulting public URL is set as block.src.
  */
+/**
+ * Apply a markdown wrap (bold/italic/link) to the current selection inside
+ * the supplied input/textarea. If nothing is selected, the wrappers are
+ * inserted at the cursor and the caret is parked between them so the user
+ * can immediately type the styled text. Returns the new value + the new
+ * selection range so the caller can call setSelectionRange.
+ */
+function wrapSelectionMd(
+  el: HTMLInputElement | HTMLTextAreaElement,
+  wrapStart: string,
+  wrapEnd: string,
+): { value: string; selStart: number; selEnd: number } {
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  const before = el.value.slice(0, start);
+  const sel = el.value.slice(start, end);
+  const after = el.value.slice(end);
+  const value = `${before}${wrapStart}${sel}${wrapEnd}${after}`;
+  const selStart = start + wrapStart.length;
+  const selEnd = selStart + sel.length;
+  return { value, selStart, selEnd };
+}
+
+/**
+ * B / I / Link toolbar that operates on the focused input. The parent passes
+ * a ref-getter so the toolbar can find the active element; the parent also
+ * supplies an onChange that receives the new whole-field value (so it can
+ * route into the right state setter for the right block / item).
+ */
+function MdToolbar({
+  getEl,
+  onChange,
+  size = 'md',
+}: {
+  getEl: () => HTMLInputElement | HTMLTextAreaElement | null;
+  onChange: (newValue: string) => void;
+  size?: 'sm' | 'md';
+}) {
+  function apply(start: string, end: string) {
+    const el = getEl();
+    if (!el) return;
+    const { value, selStart, selEnd } = wrapSelectionMd(el, start, end);
+    onChange(value);
+    // Restore selection after React re-renders the controlled input.
+    setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(selStart, selEnd);
+    }, 0);
+  }
+  const btn = cn(
+    'rounded border border-zinc-200 bg-white hover:bg-zinc-100 transition shrink-0 grid place-items-center',
+    size === 'sm' ? 'w-6 h-6 text-[11px]' : 'w-7 h-7 text-xs',
+  );
+  return (
+    <div className="flex items-center gap-1">
+      <button type="button" onClick={() => apply('**', '**')} className={cn(btn, 'font-bold')} title="Negrito (**texto**)">
+        B
+      </button>
+      <button type="button" onClick={() => apply('*', '*')} className={cn(btn, 'italic')} title="Itálico (*texto*)">
+        I
+      </button>
+      <button
+        type="button"
+        onClick={() => apply('[', '](https://)')}
+        className={btn}
+        title="Link ([texto](url))"
+      >
+        <LinkIcon size={11} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Textarea + B/I/Link toolbar paired together. The toolbar wraps the
+ * current selection inside the textarea with markdown — so users can bold
+ * a single word or just a phrase inside a longer paragraph without learning
+ * the markdown syntax.
+ */
+function FormattedTextarea({
+  label,
+  value,
+  onChange,
+  rows = 5,
+  minClass = '',
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  rows?: number;
+  minClass?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">{label}</span>
+        <MdToolbar size="sm" getEl={() => ref.current} onChange={onChange} />
+      </div>
+      <textarea
+        ref={ref}
+        rows={rows}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(inputCls, minClass, 'resize-y leading-relaxed')}
+      />
+    </div>
+  );
+}
+
+/**
+ * Row-per-item editor for the Bullets block. Each row shows the bullet/number
+ * marker on the left, an input on the right, and a small format toolbar that
+ * appears for the focused row. Enter at end of input adds a new row below;
+ * Backspace on an empty input removes the row and focuses the previous one.
+ */
+function BulletsItemsEditor({
+  items,
+  style,
+  onChange,
+}: {
+  items: string[];
+  style: 'bullet' | 'numbered';
+  onChange: (items: string[]) => void;
+}) {
+  const refs = useRef<Array<HTMLInputElement | null>>([]);
+  const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+
+  function set(i: number, value: string) {
+    const next = items.slice();
+    next[i] = value;
+    onChange(next);
+  }
+  function addAfter(i: number) {
+    const next = items.slice();
+    next.splice(i + 1, 0, '');
+    onChange(next);
+    setTimeout(() => refs.current[i + 1]?.focus(), 0);
+  }
+  function removeAt(i: number) {
+    if (items.length <= 1) {
+      // Keep at least one row — just clear it
+      set(i, '');
+      return;
+    }
+    const next = items.slice();
+    next.splice(i, 1);
+    onChange(next);
+    setTimeout(() => refs.current[Math.max(0, i - 1)]?.focus(), 0);
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {items.map((item, i) => {
+        const marker = style === 'numbered' ? `${i + 1}.` : '•';
+        const isFocused = focusedIdx === i;
+        return (
+          <div key={i} className="space-y-0.5">
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-xs text-zinc-500 w-6 text-right shrink-0 select-none">
+                {marker}
+              </span>
+              <input
+                ref={(el) => {
+                  refs.current[i] = el;
+                }}
+                value={item}
+                onChange={(e) => set(i, e.target.value)}
+                onFocus={() => setFocusedIdx(i)}
+                onBlur={() => setTimeout(() => setFocusedIdx((c) => (c === i ? null : c)), 100)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addAfter(i);
+                  } else if (e.key === 'Backspace' && item === '') {
+                    e.preventDefault();
+                    removeAt(i);
+                  } else if (e.key === 'ArrowUp' && (e.currentTarget.selectionStart ?? 0) === 0) {
+                    e.preventDefault();
+                    refs.current[Math.max(0, i - 1)]?.focus();
+                  } else if (
+                    e.key === 'ArrowDown' &&
+                    (e.currentTarget.selectionStart ?? 0) === e.currentTarget.value.length
+                  ) {
+                    e.preventDefault();
+                    refs.current[Math.min(items.length - 1, i + 1)]?.focus();
+                  }
+                }}
+                placeholder={`Item ${i + 1}`}
+                className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-brl-dark"
+              />
+              <button
+                type="button"
+                onClick={() => removeAt(i)}
+                className="shrink-0 w-6 h-6 grid place-items-center text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded"
+                title="Remover item"
+                tabIndex={-1}
+              >
+                <X size={12} />
+              </button>
+            </div>
+            {isFocused && (
+              <div className="ml-7">
+                <MdToolbar
+                  size="sm"
+                  getEl={() => refs.current[i]}
+                  onChange={(v) => set(i, v)}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        onClick={() => addAfter(items.length - 1)}
+        className="ml-7 text-xs text-zinc-500 hover:text-brl-dark inline-flex items-center gap-1"
+      >
+        + Adicionar item
+      </button>
+    </div>
+  );
+}
+
 function ImageUploader({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
