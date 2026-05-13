@@ -22,6 +22,16 @@ type StarterMeta = { id: string; name: string; description: string; category: st
 const STEPS = ['Kit', 'Settings', 'Template', 'Edit', 'Audience', 'Review'] as const;
 type Step = (typeof STEPS)[number];
 
+/**
+ * Detect the Next.js stale-Server-Action error so we can show a friendlier
+ * 'reload your tab' message instead of the cryptic action-id hash. Happens
+ * when this tab was loaded before a deploy and the recompiled action IDs
+ * no longer match the ones baked into the in-memory client bundle.
+ */
+function isStaleServerActionError(msg: string): boolean {
+  return /Server Action .* was not found on the server/i.test(msg);
+}
+
 /** Match a starter to a Lucide icon based on its built-in id suffix. */
 function starterIcon(id: string) {
   if (id.includes('announcement') || id.includes('message')) return Megaphone;
@@ -147,15 +157,32 @@ export function Wizard({
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
   const [recipientSample, setRecipientSample] = useState<string[]>([]);
 
-  // Refresh recipient preview when audience changes (in step 4)
+  // Refresh recipient preview when audience changes (in step 4). If the
+  // server action throws (e.g. stale action id from an older deploy), surface
+  // a friendly error in the wizard's error box instead of silently leaving
+  // the count at 0 — which is what was making the user think 'no recipients'
+  // when the underlying query would actually have returned 31.
   useEffect(() => {
     if (step !== 'Review') return;
     let cancelled = false;
-    previewRecipients(listIds, (filterTag || null) as ContactTag | null).then((r) => {
-      if (cancelled) return;
-      setRecipientCount(r.count);
-      setRecipientSample(r.sample);
-    });
+    previewRecipients(listIds, (filterTag || null) as ContactTag | null)
+      .then((r) => {
+        if (cancelled) return;
+        setRecipientCount(r.count);
+        setRecipientSample(r.sample);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (isStaleServerActionError(msg)) {
+          setError(
+            'Sua aba está com uma versão antiga do app. Recarregue a página (Cmd+Shift+R / Ctrl+Shift+R) e tente de novo.',
+          );
+        } else {
+          setError(`Falha ao contar destinatários: ${msg}`);
+        }
+        console.error('[previewRecipients] uncaught:', err);
+      });
     return () => { cancelled = true; };
   }, [step, listIds, filterTag]);
 
@@ -227,10 +254,22 @@ export function Wizard({
     if (!confirm(`Send to ${recipientCount ?? '?'} recipient(s)? This cannot be undone.`)) return;
     setError(null);
     start(async () => {
-      const res = await sendCampaign(campaignId);
-      if (!res.ok) return setError(res.error ?? 'Send failed');
-      router.push(`/campaigns/${campaignId}`);
-      router.refresh();
+      try {
+        const res = await sendCampaign(campaignId);
+        if (!res.ok) return setError(res.error ?? 'Send failed');
+        router.push(`/campaigns/${campaignId}`);
+        router.refresh();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (isStaleServerActionError(msg)) {
+          setError(
+            'Sua aba está com uma versão antiga do app. Recarregue a página (Cmd+Shift+R / Ctrl+Shift+R) e tente de novo.',
+          );
+        } else {
+          setError(`Erro inesperado: ${msg}`);
+        }
+        console.error('[sendCampaign] uncaught:', err);
+      }
     });
   }
 
@@ -654,7 +693,13 @@ export function Wizard({
                       // Catches uncaught throws from the server action (network, Resend SDK explosions, etc.)
                       setTestStatus('error');
                       const msg = err instanceof Error ? err.message : String(err);
-                      setTestMessage(`Erro inesperado: ${msg}`);
+                      if (isStaleServerActionError(msg)) {
+                        setTestMessage(
+                          'Sua aba está com uma versão antiga do app. Recarregue a página (Cmd+Shift+R / Ctrl+Shift+R) e tente de novo.',
+                        );
+                      } else {
+                        setTestMessage(`Erro inesperado: ${msg}`);
+                      }
                       console.error('[test-send] uncaught:', err);
                     });
                 }}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useCallback, createContext, useContext, useRef } from 'react';
+import { useState, useTransition, useCallback, useEffect, createContext, useContext, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BrandKit } from '@/lib/brand-kits';
 import { kitPalette } from '@/lib/brand-kits';
@@ -120,6 +120,28 @@ export function TemplateEditor({
       }
     });
   }
+
+  // Auto-save after every change in the document (or name / starter flag),
+  // debounced 1.2s. Without this, users could spend minutes editing in the
+  // wizard's iframed editor, then click Continuar without clicking Save —
+  // and their changes would never reach the Review preview / send pipeline.
+  // The leading-edge guard (initial-render skip) prevents a no-op save on
+  // first mount.
+  const initialMount = useRef(true);
+  useEffect(() => {
+    if (initialMount.current) {
+      initialMount.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      save();
+    }, 1200);
+    return () => clearTimeout(timer);
+    // save() is intentionally not in deps — capturing the latest doc / name /
+    // isStarter via closure is enough, and depending on a freshly-bound save
+    // would create a noisy loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, name, isStarter]);
 
   function preview() {
     // Save first so the preview iframe reads the latest html_content, then
@@ -284,16 +306,23 @@ export function TemplateEditor({
 
     {/* Preview modal — iframes /templates/[id]/preview in the same page.
         Click backdrop or Esc to close. Re-keys on every open() so the iframe
-        re-fetches the freshly-saved html_content. */}
+        re-fetches the freshly-saved html_content.
+        Sizing: max-w-4xl gives ~896px (wider than the email's 600px container
+        so it never wraps tight). max-h is 95dvh on tall screens and adapts
+        down to 100% on shorter mobiles. The iframe is the flex remainder so
+        it consumes all available height; the email scrolls inside it. */}
     {previewOpen && (
       <div
-        className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
+        className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-2 sm:p-4"
         onClick={(e) => e.target === e.currentTarget && setPreviewOpen(false)}
         onKeyDown={(e) => e.key === 'Escape' && setPreviewOpen(false)}
         role="dialog"
         aria-modal="true"
       >
-        <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90dvh] flex flex-col overflow-hidden">
+        <div
+          className="bg-white rounded-lg shadow-2xl w-full flex flex-col overflow-hidden"
+          style={{ maxWidth: 'min(96vw, 56rem)', height: 'min(95dvh, 1000px)' }}
+        >
           <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 shrink-0">
             <div className="flex items-center gap-2 text-sm">
               <Eye size={14} className="text-zinc-500" />
@@ -313,7 +342,7 @@ export function TemplateEditor({
             key={previewKey}
             src={`/templates/${templateId}/preview`}
             title="Preview do template"
-            className="block flex-1 w-full bg-zinc-50"
+            className="block flex-1 w-full bg-zinc-50 min-h-0"
             sandbox="allow-same-origin"
           />
         </div>
