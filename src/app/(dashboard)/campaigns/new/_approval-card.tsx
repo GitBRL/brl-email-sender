@@ -29,11 +29,16 @@ export function ApprovalCard({
   initialStatus,
   initialRequireAll,
   initialHistory,
+  onStatusChange,
 }: {
   campaignId: string;
   initialStatus: 'not_required' | 'pending' | 'approved' | 'changes_requested';
   initialRequireAll: boolean;
   initialHistory: ApprovalHistoryRow[];
+  /** Notifies the parent (the wizard) every time the visible status changes,
+   *  so the Send-button banner + confirm() prompts stay in sync without a
+   *  full page reload. */
+  onStatusChange?: (next: 'not_required' | 'pending' | 'approved' | 'changes_requested') => void;
 }) {
   const router = useRouter();
   const [name, setName] = useState('');
@@ -50,10 +55,15 @@ export function ApprovalCard({
     const next = await listApprovals(campaignId);
     setHistory(next);
     // Recompute the visible status from the freshest decisive response
+    let computed: typeof status;
     const decisive = next.find((r) => r.status === 'approved' || r.status === 'changes_requested');
-    if (decisive) setStatus(decisive.status as typeof status);
-    else if (next.some((r) => r.status === 'pending')) setStatus('pending');
-    else setStatus('not_required');
+    if (decisive) computed = decisive.status as typeof status;
+    else if (next.some((r) => r.status === 'pending')) computed = 'pending';
+    else computed = 'not_required';
+    setStatus(computed);
+    // Bubble up so the wizard's Send-button banner + confirm() prompts
+    // see the new status without waiting for a router.refresh().
+    onStatusChange?.(computed);
   }
 
   // Lightweight polling so a stakeholder's response shows up without a manual reload

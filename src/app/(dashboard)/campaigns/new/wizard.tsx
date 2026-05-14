@@ -102,6 +102,11 @@ export function Wizard({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  // Live approval status — lifted out of ApprovalCard so the Send button
+  // banner + confirm() prompts stay in sync with the latest poll result.
+  // Without this, the banner would only update on a full page reload.
+  const [approvalStatus, setApprovalStatus] = useState(initialApprovalStatus);
+
   // Form state — populated from resume snapshot when present.
   const [campaignId, setCampaignId] = useState<string | null>(resume?.id ?? null);
   const [brandKitId, setBrandKitId] = useState<string | null>(resume?.brandKitId ?? null);
@@ -672,7 +677,7 @@ export function Wizard({
                 </p>
               </div>
               <div className="flex flex-col items-end shrink-0">
-                <ApprovalSendBanner status={initialApprovalStatus} />
+                <ApprovalSendBanner status={approvalStatus} />
                 <button
                   type="button"
                   disabled={pending || !recipientCount}
@@ -680,17 +685,17 @@ export function Wizard({
                     // Soft warning when not approved — operator can still proceed
                     // (per spec). Skips entirely when approved or when no approval
                     // workflow has been started.
-                    if (initialApprovalStatus === 'pending') {
+                    if (approvalStatus === 'pending') {
                       if (!confirm('Esta campanha ainda não foi aprovada pelo stakeholder. Disparar mesmo assim?')) return;
                     }
-                    if (initialApprovalStatus === 'changes_requested') {
+                    if (approvalStatus === 'changes_requested') {
                       if (!confirm('Stakeholder solicitou modificações. Disparar mesmo assim NÃO é recomendado. Continuar?')) return;
                     }
                     send();
                   }}
                   className={cn(
                     'inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-4 py-2 text-sm hover:bg-brl-yellow-hover disabled:opacity-50 shrink-0 shadow-sm',
-                    initialApprovalStatus === 'changes_requested' && 'opacity-70',
+                    approvalStatus === 'changes_requested' && 'opacity-70',
                   )}
                   title={!recipientCount ? 'Nenhum destinatário corresponde a este público' : `Enviar para ${recipientCount} destinatário(s)`}
                 >
@@ -823,9 +828,10 @@ export function Wizard({
             {campaignId && (
               <ApprovalCard
                 campaignId={campaignId}
-                initialStatus={initialApprovalStatus}
+                initialStatus={approvalStatus}
                 initialRequireAll={initialRequireAll}
                 initialHistory={initialApprovalHistory}
+                onStatusChange={setApprovalStatus}
               />
             )}
 
