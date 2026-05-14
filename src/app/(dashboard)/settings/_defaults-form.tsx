@@ -11,6 +11,7 @@ export type AppSettingsRow = {
   reply_to: string | null;
   unsub_heading: string | null;
   unsub_body: string | null;
+  resend_monthly_limit: number | null;
 };
 
 export function DefaultsForm({
@@ -48,6 +49,19 @@ export function DefaultsForm({
           defaultValue={current.reply_to ?? ''}
           placeholder="optional — replies go to From if empty"
           mono
+        />
+      </div>
+
+      <div className="border-t border-zinc-100 pt-5">
+        <h3 className="text-xs uppercase tracking-wide text-zinc-500 font-semibold mb-3">
+          Cota Resend
+        </h3>
+        <Field
+          label="Limite mensal de envios (Resend)"
+          name="resend_monthly_limit"
+          defaultValue={current.resend_monthly_limit?.toString() ?? ''}
+          placeholder="ex: 50000 — deixe em branco para usar o default 3.000"
+          hint="Cap real do seu plano Resend. O dashboard usa este número para calcular os emails restantes no mês."
         />
       </div>
 

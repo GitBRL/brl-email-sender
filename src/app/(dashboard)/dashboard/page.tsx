@@ -79,6 +79,7 @@ export default async function DashboardPage({
     eventsRes,
     sendEventsRes,
     monthSendCountRes,
+    appSettingsRes,
   ] = await Promise.all([
     supabase.from('contacts').select('id, tag, status, created_at'),
     supabase.from('campaigns').select('*', { count: 'exact', head: true }).eq('status', 'sent'),
@@ -93,18 +94,29 @@ export default async function DashboardPage({
       .from('email_events')
       .select('event_type, created_at')
       .gte('created_at', last30.toISOString()),
-    // Sent events scoped to the SELECTED range — for the daily 'Emails sent' chart
+    // 'Emails sent' chart — count ONE event per email. We use 'sent' (the
+    // event our send pipeline emits at dispatch). 'delivered' would
+    // double-count: Resend's webhook fires both 'sent' and 'delivered' for
+    // every email, plus deliveries can come for emails sent before the local
+    // sent event was wired up.
     supabase
       .from('email_events')
       .select('created_at')
-      .in('event_type', ['sent', 'delivered'])
+      .eq('event_type', 'sent')
       .gte('created_at', new Date(startMs).toISOString()),
-    // Sent count THIS calendar month — for the Resend quota card
+    // Sent count THIS calendar month — for the Resend quota card. Same
+    // logic — 'sent' only.
     supabase
       .from('email_events')
       .select('*', { count: 'exact', head: true })
-      .in('event_type', ['sent', 'delivered'])
+      .eq('event_type', 'sent')
       .gte('created_at', monthStart.toISOString()),
+    // Operator-set monthly Resend limit (plan cap)
+    supabase
+      .from('app_settings')
+      .select('resend_monthly_limit')
+      .eq('id', true)
+      .maybeSingle<{ resend_monthly_limit: number | null }>(),
   ]);
 
   const contacts = contactsAgg.data ?? [];
@@ -165,10 +177,15 @@ export default async function DashboardPage({
   }
   const totalSentInRange = sentPerDay.reduce((a, b) => a + b, 0);
 
-  // 3) Resend monthly quota
+  // 3) Resend monthly quota — limit comes from (in order): app_settings row
+  //    (operator-editable in /settings), then RESEND_MONTHLY_LIMIT env var,
+  //    then 3000 (free tier default).
   const sentThisMonth = monthSendCountRes.count ?? 0;
-  const remaining = Math.max(0, RESEND_MONTHLY_LIMIT - sentThisMonth);
-  const usagePct = Math.min(100, Math.round((sentThisMonth / RESEND_MONTHLY_LIMIT) * 100));
+  const monthlyLimit =
+    appSettingsRes.data?.resend_monthly_limit ??
+    RESEND_MONTHLY_LIMIT;
+  const remaining = Math.max(0, monthlyLimit - sentThisMonth);
+  const usagePct = Math.min(100, Math.round((sentThisMonth / monthlyLimit) * 100));
   const monthName = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
   // Engagement chart still shows fixed 30d window so the cards above match
@@ -285,7 +302,7 @@ export default async function DashboardPage({
               <span className="text-sm font-normal text-zinc-500"> restantes</span>
             </div>
             <div className="text-[11px] text-zinc-500 mb-3">
-              {sentThisMonth.toLocaleString('pt-BR')} de {RESEND_MONTHLY_LIMIT.toLocaleString('pt-BR')} usados ({usagePct}%)
+              {sentThisMonth.toLocaleString('pt-BR')} de {monthlyLimit.toLocaleString('pt-BR')} usados ({usagePct}%)
             </div>
             <div className="h-3 rounded-full bg-zinc-100 overflow-hidden">
               <div
@@ -302,9 +319,10 @@ export default async function DashboardPage({
               <div><span className="text-amber-600">●</span> &lt;90%</div>
               <div><span className="text-red-600">●</span> ≥90%</div>
             </div>
-            {RESEND_MONTHLY_LIMIT === 3000 && (
+            {!appSettingsRes.data?.resend_monthly_limit && (
               <p className="text-[10px] text-zinc-400 mt-2 leading-tight">
-                Limite padrão do Resend free tier (3.000/mês). Para alterar, defina <code>RESEND_MONTHLY_LIMIT</code> no Netlify.
+                Limite padrão. Configure o cap real do seu plano em{' '}
+                <Link href="/settings" className="underline hover:text-zinc-700">Settings</Link>.
               </p>
             )}
           </div>

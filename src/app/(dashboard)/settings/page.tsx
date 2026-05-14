@@ -35,7 +35,7 @@ export default async function SettingsPage() {
       .order('created_at', { ascending: true }),
     supabase
       .from('app_settings')
-      .select('from_name, from_email, reply_to, unsub_heading, unsub_body')
+      .select('from_name, from_email, reply_to, unsub_heading, unsub_body, resend_monthly_limit')
       .eq('id', true)
       .maybeSingle<AppSettingsRow>(),
     supabase
@@ -53,6 +53,7 @@ export default async function SettingsPage() {
     reply_to: null,
     unsub_heading: null,
     unsub_body: null,
+    resend_monthly_limit: null,
   };
 
   const fromDomain = FROM_EMAIL.split('@')[1] ?? '—';

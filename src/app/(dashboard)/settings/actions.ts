@@ -155,6 +155,18 @@ export async function updateAppSettings(
     const v = String(formData.get(k) ?? '').trim();
     return v === '' ? null : v;
   };
+  // Parse the optional Resend monthly limit — accept '' (clear), a digit
+  // string (set), or anything else (rejected).
+  const limitRaw = String(formData.get('resend_monthly_limit') ?? '').trim();
+  let resendMonthlyLimit: number | null = null;
+  if (limitRaw !== '') {
+    const n = parseInt(limitRaw, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      return { ok: false, error: 'Limite Resend deve ser um número positivo.' };
+    }
+    resendMonthlyLimit = n;
+  }
+
   const supabase = createServiceClient();
   const { error } = await supabase.from('app_settings').upsert({
     id: true,
@@ -163,8 +175,10 @@ export async function updateAppSettings(
     reply_to: norm('reply_to'),
     unsub_heading: norm('unsub_heading'),
     unsub_body: norm('unsub_body'),
+    resend_monthly_limit: resendMonthlyLimit,
   });
   if (error) return { ok: false, error: error.message };
   revalidatePath('/settings');
+  revalidatePath('/dashboard');
   return { ok: true, info: 'Settings saved.' };
 }
