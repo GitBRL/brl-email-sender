@@ -26,10 +26,13 @@ export default async function NewCampaignPage({
   // Resume mode: when /campaigns/new?id=<uuid>, hydrate the wizard with an
   // existing draft so the user can pick up where they left off.
   let resume: ResumeData | null = null;
+  let initialApprovalStatus: 'not_required' | 'pending' | 'approved' | 'changes_requested' = 'not_required';
+  let initialRequireAll = false;
+  let initialApprovalHistory: import('../actions').ApprovalHistoryRow[] = [];
   if (sp.id) {
     const { data: row } = await supabase
       .from('campaigns')
-      .select('id, name, subject, from_name, from_email, reply_to, template_id, brand_kit_id, list_ids, filter_tag, status')
+      .select('id, name, subject, from_name, from_email, reply_to, template_id, brand_kit_id, list_ids, filter_tag, status, approval_status, approval_require_all')
       .eq('id', sp.id)
       .maybeSingle();
     if (row && row.status === 'draft') {
@@ -45,6 +48,14 @@ export default async function NewCampaignPage({
         listIds: (row.list_ids ?? []) as string[],
         filterTag: (row.filter_tag ?? '') as ContactTag | '',
       };
+      initialApprovalStatus = (row.approval_status ?? 'not_required') as typeof initialApprovalStatus;
+      initialRequireAll = !!row.approval_require_all;
+      const { data: hist } = await supabase
+        .from('campaign_approvals')
+        .select('id, stakeholder_name, stakeholder_email, status, feedback_note, sent_at, responded_at, expires_at')
+        .eq('campaign_id', sp.id)
+        .order('sent_at', { ascending: false });
+      initialApprovalHistory = (hist ?? []) as typeof initialApprovalHistory;
     }
   }
 
@@ -69,6 +80,9 @@ export default async function NewCampaignPage({
         defaultFromName={FROM_NAME}
         defaultFromEmail={FROM_EMAIL}
         resume={resume}
+        initialApprovalStatus={initialApprovalStatus}
+        initialRequireAll={initialRequireAll}
+        initialApprovalHistory={initialApprovalHistory}
       />
     </div>
   );

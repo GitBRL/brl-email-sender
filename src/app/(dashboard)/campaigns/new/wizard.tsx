@@ -14,6 +14,8 @@ import type { ContactTag } from '@/types';
 import { cn } from '@/lib/utils';
 import type { BrandKit } from '@/lib/brand-kits';
 import { BrandKitPicker } from '@/components/brand-kit-picker';
+import type { ApprovalHistoryRow } from '../actions';
+import { ApprovalCard, ApprovalSendBanner } from './_approval-card';
 
 type Template = { id: string; name: string; updated_at: string; brand_kit_id: string | null };
 type List = { id: string; name: string; contact_count: number };
@@ -78,6 +80,9 @@ export function Wizard({
   defaultFromName,
   defaultFromEmail,
   resume,
+  initialApprovalStatus = 'not_required',
+  initialRequireAll = false,
+  initialApprovalHistory = [],
 }: {
   templates: Template[];
   lists: List[];
@@ -88,6 +93,9 @@ export function Wizard({
   /** When supplied, the wizard hydrates from this snapshot and starts on the
    *  step the user was last on (best-effort: see initialStepFor). */
   resume: ResumeData | null;
+  initialApprovalStatus?: 'not_required' | 'pending' | 'approved' | 'changes_requested';
+  initialRequireAll?: boolean;
+  initialApprovalHistory?: ApprovalHistoryRow[];
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>(() => initialStepFor(resume));
@@ -663,15 +671,32 @@ export function Wizard({
                   Veja exatamente como o email vai chegar, envie um teste e dispare a campanha.
                 </p>
               </div>
-              <button
-                type="button"
-                disabled={pending || !recipientCount}
-                onClick={send}
-                className="inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-4 py-2 text-sm hover:bg-brl-yellow-hover disabled:opacity-50 shrink-0 shadow-sm"
-                title={!recipientCount ? 'Nenhum destinatário corresponde a este público' : `Enviar para ${recipientCount} destinatário(s)`}
-              >
-                <Send size={14} /> {pending ? 'Enviando…' : `Enviar campanha${recipientCount ? ` (${recipientCount})` : ''}`}
-              </button>
+              <div className="flex flex-col items-end shrink-0">
+                <ApprovalSendBanner status={initialApprovalStatus} />
+                <button
+                  type="button"
+                  disabled={pending || !recipientCount}
+                  onClick={() => {
+                    // Soft warning when not approved — operator can still proceed
+                    // (per spec). Skips entirely when approved or when no approval
+                    // workflow has been started.
+                    if (initialApprovalStatus === 'pending') {
+                      if (!confirm('Esta campanha ainda não foi aprovada pelo stakeholder. Disparar mesmo assim?')) return;
+                    }
+                    if (initialApprovalStatus === 'changes_requested') {
+                      if (!confirm('Stakeholder solicitou modificações. Disparar mesmo assim NÃO é recomendado. Continuar?')) return;
+                    }
+                    send();
+                  }}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-4 py-2 text-sm hover:bg-brl-yellow-hover disabled:opacity-50 shrink-0 shadow-sm',
+                    initialApprovalStatus === 'changes_requested' && 'opacity-70',
+                  )}
+                  title={!recipientCount ? 'Nenhum destinatário corresponde a este público' : `Enviar para ${recipientCount} destinatário(s)`}
+                >
+                  <Send size={14} /> {pending ? 'Enviando…' : `Enviar campanha${recipientCount ? ` (${recipientCount})` : ''}`}
+                </button>
+              </div>
             </div>
 
             {/* Headline counters */}
@@ -793,6 +818,16 @@ export function Wizard({
                 </p>
               )}
             </div>
+
+            {/* Stakeholder approval workflow */}
+            {campaignId && (
+              <ApprovalCard
+                campaignId={campaignId}
+                initialStatus={initialApprovalStatus}
+                initialRequireAll={initialRequireAll}
+                initialHistory={initialApprovalHistory}
+              />
+            )}
 
             {/* Summary */}
             <details>

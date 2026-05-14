@@ -8,6 +8,7 @@ import { resend, FROM_EMAIL, FROM_NAME } from '@/lib/resend';
 import { prepareCampaignHtml, personalize, personalizeSubject } from '@/lib/tracking';
 import type { ContactTag } from '@/types';
 import { applyKitToBlocks, type BrandKit } from '@/lib/brand-kits';
+import { buildApprovalEmail } from '@/lib/approval-email';
 import { findStarter } from '@/lib/starter-templates';
 import { compileTemplate } from '@/lib/compile-template';
 import { uid, type Block, type ButtonBlock, type TemplateDocument } from '@/lib/blocks';
@@ -545,4 +546,251 @@ export async function sendCampaign(id: string): Promise<ActionState> {
   revalidatePath('/campaigns');
   revalidatePath(`/campaigns/${id}`);
   return { ok: true, sent, failed };
+}
+
+// =====================================================================
+// Stakeholder approval workflow
+// =====================================================================
+
+const ApprovalRequestInput = z.object({
+  stakeholderName: z.string().trim().max(120).optional().or(z.literal('')).transform((v) => v || null),
+  stakeholderEmail: z.string().trim().toLowerCase().email(),
+});
+
+export type ApprovalHistoryRow = {
+  id: string;
+  stakeholder_name: string | null;
+  stakeholder_email: string;
+  status: 'pending' | 'approved' | 'changes_requested' | 'cancelled' | 'expired';
+  feedback_note: string | null;
+  sent_at: string;
+  responded_at: string | null;
+  expires_at: string;
+};
+
+/**
+ * Request stakeholder approval for a campaign. Inserts a campaign_approvals
+ * row, sends the approval email via Resend, and bumps campaigns.approval_status
+ * to 'pending'. Idempotent at the row level — every call creates a new request
+ * (multiple stakeholders are supported; cancel old ones via cancelApproval).
+ */
+export async function requestApproval(
+  campaignId: string,
+  input: { stakeholderName?: string; stakeholderEmail: string },
+): Promise<{ ok: true; approvalId: string } | { ok: false; error: string }> {
+  await requireRole('editor');
+  const parsed = ApprovalRequestInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
+  }
+
+  const supabase = createServiceClient();
+  const { data: campaign, error: cErr } = await supabase
+    .from('campaigns')
+    .select('id, name, template_id, from_name, from_email')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (cErr || !campaign) return { ok: false, error: cErr?.message ?? 'Campaign not found.' };
+  if (!campaign.template_id) return { ok: false, error: 'Pick a template before requesting approval.' };
+
+  const { data: template } = await supabase
+    .from('templates')
+    .select('html_content')
+    .eq('id', campaign.template_id)
+    .maybeSingle();
+  if (!template?.html_content) return { ok: false, error: 'Template HTML is empty.' };
+
+  // Pull the BRL master logo (if uploaded) for the approval-email header
+  const { data: brlKit } = await supabase
+    .from('brand_kits')
+    .select('logo_url')
+    .eq('slug', 'brl')
+    .maybeSingle();
+
+  // Insert the approval row first so we have its token
+  const { data: row, error: insertErr } = await supabase
+    .from('campaign_approvals')
+    .insert({
+      campaign_id: campaignId,
+      stakeholder_name: parsed.data.stakeholderName,
+      stakeholder_email: parsed.data.stakeholderEmail,
+      status: 'pending',
+    })
+    .select('id, token')
+    .single();
+  if (insertErr || !row) return { ok: false, error: insertErr?.message ?? 'Insert failed.' };
+
+  // Build + send the approval email
+  const { html, subject } = buildApprovalEmail({
+    campaignHtml: template.html_content,
+    campaignName: campaign.name ?? 'Campanha sem nome',
+    stakeholderName: parsed.data.stakeholderName,
+    token: row.token,
+    brlLogoUrl: brlKit?.logo_url ?? null,
+  });
+
+  // From address: use the campaign's from_name / from_email if set so the
+  // approval email feels like part of the brand, falling back to env defaults.
+  const { data: appSettings } = await supabase
+    .from('app_settings')
+    .select('from_name, from_email')
+    .eq('id', true)
+    .maybeSingle();
+  const effFromName = campaign.from_name || appSettings?.from_name || FROM_NAME;
+  const effFromEmail = campaign.from_email || appSettings?.from_email || FROM_EMAIL;
+
+  try {
+    const result = await resend.emails.send({
+      from: `${effFromName} <${effFromEmail}>`,
+      to: parsed.data.stakeholderEmail,
+      subject,
+      html,
+    });
+    if (result.error) {
+      console.error('[requestApproval] Resend rejected:', result.error);
+      // Roll back the row so we don't have a 'pending' approval that was never sent
+      await supabase.from('campaign_approvals').delete().eq('id', row.id);
+      return { ok: false, error: `Resend: ${result.error.message}` };
+    }
+  } catch (e) {
+    console.error('[requestApproval] threw:', e);
+    await supabase.from('campaign_approvals').delete().eq('id', row.id);
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  // Bump campaign.approval_status if it was 'not_required' or already settled
+  await recomputeApprovalStatus(supabase, campaignId);
+
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true, approvalId: row.id };
+}
+
+/** Cancel a pending approval (operator sent to wrong email, etc.). The token
+ *  becomes invalid — stakeholder will see a 'link cancelled' page if they
+ *  try to respond. */
+export async function cancelApproval(approvalId: string): Promise<ActionState> {
+  await requireRole('editor');
+  const supabase = createServiceClient();
+  const { data: row } = await supabase
+    .from('campaign_approvals')
+    .select('id, campaign_id, status')
+    .eq('id', approvalId)
+    .maybeSingle();
+  if (!row) return { ok: false, error: 'Approval request not found.' };
+  if (row.status !== 'pending') {
+    return { ok: false, error: `Não pode cancelar — status já é '${row.status}'.` };
+  }
+  const { error } = await supabase
+    .from('campaign_approvals')
+    .update({ status: 'cancelled', responded_at: new Date().toISOString() })
+    .eq('id', approvalId);
+  if (error) return { ok: false, error: error.message };
+  await recomputeApprovalStatus(supabase, row.campaign_id);
+  revalidatePath(`/campaigns/${row.campaign_id}`);
+  return { ok: true };
+}
+
+/** Re-fetch + re-send the approval email for an existing pending request
+ *  (stakeholder lost the email, marked as spam, etc.). Generates a fresh
+ *  token + extends the expiry. */
+export async function resendApproval(approvalId: string): Promise<ActionState> {
+  await requireRole('editor');
+  const supabase = createServiceClient();
+  const { data: row } = await supabase
+    .from('campaign_approvals')
+    .select('id, campaign_id, stakeholder_name, stakeholder_email, status')
+    .eq('id', approvalId)
+    .maybeSingle();
+  if (!row) return { ok: false, error: 'Approval not found.' };
+  if (row.status !== 'pending') {
+    return { ok: false, error: `Não pode reenviar — status já é '${row.status}'.` };
+  }
+  // Cancel the old, create a new one (preserves the audit trail)
+  await supabase
+    .from('campaign_approvals')
+    .update({ status: 'cancelled', responded_at: new Date().toISOString() })
+    .eq('id', approvalId);
+  const send = await requestApproval(row.campaign_id, {
+    stakeholderName: row.stakeholder_name ?? undefined,
+    stakeholderEmail: row.stakeholder_email,
+  });
+  if (!send.ok) return send;
+  return { ok: true };
+}
+
+/**
+ * Recompute campaigns.approval_status from the live set of approvals.
+ *
+ * Rules:
+ *  - No active approvals (all cancelled/expired or none exist) → 'not_required'
+ *  - require_all = false → reflect the latest non-cancelled response
+ *      (any 'approved' / 'changes_requested' overwrites 'pending')
+ *  - require_all = true  → 'approved' only if EVERY non-cancelled is 'approved';
+ *      any 'changes_requested' wins; else 'pending'
+ *
+ * Internal helper — called after every approval mutation. Exported so the
+ * /api/approval/respond route can call it after committing a response.
+ */
+export async function recomputeApprovalStatus(
+  supabase: ReturnType<typeof createServiceClient>,
+  campaignId: string,
+): Promise<void> {
+  const { data: campaign } = await supabase
+    .from('campaigns')
+    .select('approval_require_all')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (!campaign) return;
+
+  const { data: rows } = await supabase
+    .from('campaign_approvals')
+    .select('status, responded_at, sent_at')
+    .eq('campaign_id', campaignId)
+    .neq('status', 'cancelled')
+    .neq('status', 'expired')
+    .order('responded_at', { ascending: false, nullsFirst: false })
+    .order('sent_at', { ascending: false });
+
+  const active = rows ?? [];
+  let next: 'not_required' | 'pending' | 'approved' | 'changes_requested' = 'not_required';
+  if (active.length === 0) {
+    next = 'not_required';
+  } else if (campaign.approval_require_all) {
+    if (active.some((r) => r.status === 'changes_requested')) next = 'changes_requested';
+    else if (active.every((r) => r.status === 'approved')) next = 'approved';
+    else next = 'pending';
+  } else {
+    // Latest non-pending wins; if all still pending, 'pending'
+    const decisive = active.find((r) => r.status === 'approved' || r.status === 'changes_requested');
+    next = (decisive?.status as typeof next) ?? 'pending';
+  }
+  await supabase.from('campaigns').update({ approval_status: next }).eq('id', campaignId);
+}
+
+/** Toggle the 'require_all' flag on a campaign — exposed so the wizard UI can
+ *  flip it without going through updateCampaign's bigger schema. */
+export async function setRequireAllApprovals(campaignId: string, value: boolean): Promise<ActionState> {
+  await requireRole('editor');
+  const supabase = createServiceClient();
+  const { error } = await supabase
+    .from('campaigns')
+    .update({ approval_require_all: value })
+    .eq('id', campaignId);
+  if (error) return { ok: false, error: error.message };
+  await recomputeApprovalStatus(supabase, campaignId);
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true };
+}
+
+/** Read-only fetch of all approval requests for a campaign — used by the
+ *  wizard UI to render the history table. */
+export async function listApprovals(campaignId: string): Promise<ApprovalHistoryRow[]> {
+  await requireRole('viewer');
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from('campaign_approvals')
+    .select('id, stakeholder_name, stakeholder_email, status, feedback_note, sent_at, responded_at, expires_at')
+    .eq('campaign_id', campaignId)
+    .order('sent_at', { ascending: false });
+  return (data ?? []) as ApprovalHistoryRow[];
 }
