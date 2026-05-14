@@ -1,23 +1,84 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { createServiceClient } from '@/lib/supabase/server';
 import { pct } from '@/lib/utils';
 import { requireProfile } from '@/lib/auth';
 import { SparkLine } from '@/components/charts/spark-line';
 import { BarList } from '@/components/charts/bar-list';
+import { RangeSelector } from './_range-selector';
 
-export default async function DashboardPage() {
+/**
+ * Dashboard. The three primary charts (Audience growth / Sent over time /
+ * Resend monthly quota) all respect a single time-range selector at the top
+ * (?range=30d|60d|90d|custom + ?from / ?to). Resend quota is special-cased
+ * to ALWAYS reflect the current calendar month since that's when Resend's
+ * monthly cap actually resets.
+ */
+
+type Search = { range?: string; from?: string; to?: string };
+
+function resolveRange(sp: Search): { startMs: number; days: number; label: string } {
+  const now = new Date();
+  now.setHours(23, 59, 59, 999);
+  const endMs = now.getTime();
+
+  if (sp.range === 'custom' && sp.from && sp.to) {
+    const f = new Date(sp.from);
+    f.setHours(0, 0, 0, 0);
+    const t = new Date(sp.to);
+    t.setHours(23, 59, 59, 999);
+    if (!isNaN(f.getTime()) && !isNaN(t.getTime()) && f.getTime() <= t.getTime()) {
+      const days = Math.max(1, Math.ceil((t.getTime() - f.getTime()) / 86_400_000));
+      return {
+        startMs: f.getTime(),
+        days,
+        label: `${sp.from} → ${sp.to}`,
+      };
+    }
+  }
+  const presetDays =
+    sp.range === '90d' ? 90 :
+    sp.range === '60d' ? 60 :
+    30;
+  const start = new Date(now);
+  start.setDate(start.getDate() - (presetDays - 1));
+  start.setHours(0, 0, 0, 0);
+  return {
+    startMs: start.getTime(),
+    days: presetDays,
+    label: `últimos ${presetDays} dias`,
+  };
+}
+
+const RESEND_MONTHLY_LIMIT = parseInt(process.env.RESEND_MONTHLY_LIMIT ?? '3000', 10);
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const profile = await requireProfile();
+  const sp = await searchParams;
   const supabase = createServiceClient();
 
-  const since = new Date();
-  since.setDate(since.getDate() - 30);
-  const sinceISO = since.toISOString();
+  const { startMs, days, label } = resolveRange(sp);
+
+  // First day of current calendar month (for Resend monthly quota — the cap
+  // resets on the 1st regardless of the selected display range).
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const last30 = new Date();
+  last30.setDate(last30.getDate() - 30);
 
   const [
     contactsAgg,
     campaignsAgg,
     recentRes,
     eventsRes,
+    sendEventsRes,
+    monthSendCountRes,
   ] = await Promise.all([
     supabase.from('contacts').select('id, tag, status, created_at'),
     supabase.from('campaigns').select('*', { count: 'exact', head: true }).eq('status', 'sent'),
@@ -26,10 +87,24 @@ export default async function DashboardPage() {
       .select('id, name, subject, status, sent_at, total_recipients')
       .order('created_at', { ascending: false })
       .limit(5),
+    // Engagement (opens/clicks) for the headline rates — always fixed 30d
+    // window so the rate cards stay comparable
     supabase
       .from('email_events')
       .select('event_type, created_at')
-      .gte('created_at', sinceISO),
+      .gte('created_at', last30.toISOString()),
+    // Sent events scoped to the SELECTED range — for the daily 'Emails sent' chart
+    supabase
+      .from('email_events')
+      .select('created_at')
+      .in('event_type', ['sent', 'delivered'])
+      .gte('created_at', new Date(startMs).toISOString()),
+    // Sent count THIS calendar month — for the Resend quota card
+    supabase
+      .from('email_events')
+      .select('*', { count: 'exact', head: true })
+      .in('event_type', ['sent', 'delivered'])
+      .gte('created_at', monthStart.toISOString()),
   ]);
 
   const contacts = contactsAgg.data ?? [];
@@ -53,63 +128,75 @@ export default async function DashboardPage() {
   const openRate = pct(counts.opened, counts.sent);
   const ctr = pct(counts.clicked, counts.sent);
 
-  // 30-day daily series for opens vs clicks
+  // ---- Series: build day-bucketed labels for the selected range ----
   const labels: string[] = [];
-  const opens: number[] = [];
-  const clicks: number[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(startMs);
+    d.setDate(d.getDate() + i);
+    labels.push(`${d.getDate()}/${d.getMonth() + 1}`);
+  }
+
+  // 1) Audience growth — cumulative count of contacts (ONLY the contacts
+  //    table) by day. Does NOT include sent emails or recipients.
+  const newPerDay: number[] = new Array(days).fill(0);
+  let baseline = 0;
+  for (const c of contacts) {
+    const created = new Date(c.created_at).getTime();
+    if (created < startMs) {
+      baseline++;
+      continue;
+    }
+    const day = Math.floor((created - startMs) / 86_400_000);
+    if (day >= 0 && day < days) newPerDay[day]++;
+  }
+  const cumulative: number[] = new Array(days);
+  let running = baseline;
+  for (let i = 0; i < days; i++) {
+    running += newPerDay[i];
+    cumulative[i] = running;
+  }
+  const newInRange = newPerDay.reduce((a, b) => a + b, 0);
+
+  // 2) Emails sent over the selected range — daily counts
+  const sentPerDay: number[] = new Array(days).fill(0);
+  for (const e of sendEventsRes.data ?? []) {
+    const day = Math.floor((new Date(e.created_at).getTime() - startMs) / 86_400_000);
+    if (day >= 0 && day < days) sentPerDay[day]++;
+  }
+  const totalSentInRange = sentPerDay.reduce((a, b) => a + b, 0);
+
+  // 3) Resend monthly quota
+  const sentThisMonth = monthSendCountRes.count ?? 0;
+  const remaining = Math.max(0, RESEND_MONTHLY_LIMIT - sentThisMonth);
+  const usagePct = Math.min(100, Math.round((sentThisMonth / RESEND_MONTHLY_LIMIT) * 100));
+  const monthName = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
+  // Engagement chart still shows fixed 30d window so the cards above match
+  const engagementLabels: string[] = [];
+  const engOpens: number[] = [];
+  const engClicks: number[] = [];
   for (let i = 29; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     d.setHours(0, 0, 0, 0);
-    labels.push(`${d.getDate()}/${d.getMonth() + 1}`);
-    opens.push(0);
-    clicks.push(0);
+    engagementLabels.push(`${d.getDate()}/${d.getMonth() + 1}`);
+    engOpens.push(0);
+    engClicks.push(0);
   }
-  const startMs = new Date();
-  startMs.setDate(startMs.getDate() - 29);
-  startMs.setHours(0, 0, 0, 0);
+  const engStart = new Date();
+  engStart.setDate(engStart.getDate() - 29);
+  engStart.setHours(0, 0, 0, 0);
   for (const e of events) {
     const dayIdx = Math.floor(
-      (new Date(e.created_at).getTime() - startMs.getTime()) / 86_400_000
+      (new Date(e.created_at).getTime() - engStart.getTime()) / 86_400_000
     );
     if (dayIdx < 0 || dayIdx >= 30) continue;
-    if (e.event_type === 'opened') opens[dayIdx]++;
-    else if (e.event_type === 'clicked') clicks[dayIdx]++;
+    if (e.event_type === 'opened') engOpens[dayIdx]++;
+    else if (e.event_type === 'clicked') engClicks[dayIdx]++;
   }
-
-  // 90-day audience growth: cumulative contact count by day.
-  const growthLabels: string[] = [];
-  const newPerDay: number[] = new Array(90).fill(0);
-  const growthStart = new Date();
-  growthStart.setDate(growthStart.getDate() - 89);
-  growthStart.setHours(0, 0, 0, 0);
-  for (let i = 0; i < 90; i++) {
-    const d = new Date(growthStart);
-    d.setDate(d.getDate() + i);
-    growthLabels.push(`${d.getDate()}/${d.getMonth() + 1}`);
-  }
-  // Count contacts created before the 90-day window opens
-  let baseline = 0;
-  for (const c of contacts) {
-    const created = new Date(c.created_at).getTime();
-    if (created < growthStart.getTime()) {
-      baseline++;
-      continue;
-    }
-    const day = Math.floor((created - growthStart.getTime()) / 86_400_000);
-    if (day >= 0 && day < 90) newPerDay[day]++;
-  }
-  // Build cumulative series
-  const cumulative: number[] = new Array(90);
-  let running = baseline;
-  for (let i = 0; i < 90; i++) {
-    running += newPerDay[i];
-    cumulative[i] = running;
-  }
-  const new90 = newPerDay.reduce((a, b) => a + b, 0);
 
   return (
-    <div className="p-8 space-y-8 max-w-6xl">
+    <div className="p-8 space-y-8 max-w-7xl">
       <header>
         <h1 className="text-2xl font-bold">Hello{profile.name ? `, ${profile.name}` : ''}</h1>
         <p className="text-sm text-zinc-500 mt-1">
@@ -128,37 +215,114 @@ export default async function DashboardPage() {
         <Stat label="Avg. click-through" value={`${ctr}%`} sub="last 30 days" />
       </section>
 
-      <section className="bg-white rounded-lg border border-zinc-200 p-6">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-4">
-          Engagement — last 30 days
-        </h2>
-        <SparkLine
-          labels={labels}
-          series={[
-            { name: 'Opens', color: '#10b981', data: opens },
-            { name: 'Clicks', color: '#3b82f6', data: clicks },
-          ]}
-          height={200}
-        />
+      {/* Range selector + 3 primary charts ------------------------------ */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+              Métricas
+            </h2>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              Período: <span className="font-medium text-zinc-700">{label}</span>
+            </p>
+          </div>
+          <Suspense fallback={null}>
+            <RangeSelector />
+          </Suspense>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Audience growth — pure contacts count cumulative */}
+          <div className="bg-white rounded-lg border border-zinc-200 p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Crescimento da audiência
+              </h3>
+              <span className="text-[10px] text-zinc-500">contatos cadastrados</span>
+            </div>
+            <div className="text-2xl font-bold tabular-nums">
+              {totalContacts.toLocaleString('pt-BR')}
+            </div>
+            <div className="text-[11px] text-zinc-500 mb-2">
+              +{newInRange.toLocaleString('pt-BR')} no período
+            </div>
+            <SparkLine
+              labels={labels}
+              series={[{ name: 'Total contatos', color: '#f47216', data: cumulative }]}
+              height={120}
+            />
+          </div>
+
+          {/* Emails sent over the range */}
+          <div className="bg-white rounded-lg border border-zinc-200 p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Emails enviados
+              </h3>
+              <span className="text-[10px] text-zinc-500">por dia</span>
+            </div>
+            <div className="text-2xl font-bold tabular-nums">
+              {totalSentInRange.toLocaleString('pt-BR')}
+            </div>
+            <div className="text-[11px] text-zinc-500 mb-2">total no período</div>
+            <SparkLine
+              labels={labels}
+              series={[{ name: 'Sent', color: '#3b82f6', data: sentPerDay }]}
+              height={120}
+            />
+          </div>
+
+          {/* Resend monthly quota — always current calendar month */}
+          <div className="bg-white rounded-lg border border-zinc-200 p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Cota Resend
+              </h3>
+              <span className="text-[10px] text-zinc-500 capitalize">{monthName}</span>
+            </div>
+            <div className="text-2xl font-bold tabular-nums">
+              {remaining.toLocaleString('pt-BR')}
+              <span className="text-sm font-normal text-zinc-500"> restantes</span>
+            </div>
+            <div className="text-[11px] text-zinc-500 mb-3">
+              {sentThisMonth.toLocaleString('pt-BR')} de {RESEND_MONTHLY_LIMIT.toLocaleString('pt-BR')} usados ({usagePct}%)
+            </div>
+            <div className="h-3 rounded-full bg-zinc-100 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${usagePct}%`,
+                  background:
+                    usagePct >= 90 ? '#ef4444' : usagePct >= 70 ? '#f59e0b' : '#10b981',
+                }}
+              />
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-[10px] text-zinc-500">
+              <div><span className="text-emerald-600">●</span> &lt;70%</div>
+              <div><span className="text-amber-600">●</span> &lt;90%</div>
+              <div><span className="text-red-600">●</span> ≥90%</div>
+            </div>
+            {RESEND_MONTHLY_LIMIT === 3000 && (
+              <p className="text-[10px] text-zinc-400 mt-2 leading-tight">
+                Limite padrão do Resend free tier (3.000/mês). Para alterar, defina <code>RESEND_MONTHLY_LIMIT</code> no Netlify.
+              </p>
+            )}
+          </div>
+        </div>
       </section>
 
+      {/* Engagement (opens vs clicks) — keeps its dedicated 30d view -------- */}
       <section className="bg-white rounded-lg border border-zinc-200 p-6">
-        <div className="flex items-baseline justify-between mb-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
-            Audience growth — last 90 days
-          </h2>
-          <span className="text-xs text-zinc-500">
-            +{new90.toLocaleString('pt-BR')} new contact{new90 === 1 ? '' : 's'} ·{' '}
-            <span className="text-zinc-900 font-medium">
-              {totalContacts.toLocaleString('pt-BR')}
-            </span>{' '}
-            total
-          </span>
-        </div>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-4">
+          Engajamento — últimos 30 dias
+        </h2>
         <SparkLine
-          labels={growthLabels}
-          series={[{ name: 'Total contacts', color: '#f47216', data: cumulative }]}
-          height={180}
+          labels={engagementLabels}
+          series={[
+            { name: 'Opens', color: '#10b981', data: engOpens },
+            { name: 'Clicks', color: '#3b82f6', data: engClicks },
+          ]}
+          height={200}
         />
       </section>
 
@@ -217,35 +381,36 @@ export default async function DashboardPage() {
 
       {!profile.role || profile.role === 'viewer' ? (
         <p className="text-xs text-zinc-500">
-          You currently have view-only access. An admin must elevate your role to send campaigns.
+          You have view-only access. Contact an admin to be promoted to editor.
         </p>
       ) : null}
     </div>
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="bg-white rounded-lg border border-zinc-200 p-5">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+    <div className="bg-white rounded-lg border border-zinc-200 p-4">
+      <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
       <div className="text-2xl font-bold mt-1 tabular-nums">{value}</div>
-      {sub && <div className="text-[10px] text-zinc-500 mt-0.5">{sub}</div>}
+      <div className="text-xs text-zinc-500">{sub}</div>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const style: Record<string, string> = {
+  const styles: Record<string, string> = {
     draft: 'bg-zinc-100 text-zinc-700',
-    scheduled: 'bg-blue-50 text-blue-700',
     sending: 'bg-amber-50 text-amber-700',
     sent: 'bg-emerald-50 text-emerald-700',
-    paused: 'bg-zinc-200 text-zinc-700',
+    paused: 'bg-zinc-100 text-zinc-500',
     failed: 'bg-red-50 text-red-700',
   };
   return (
     <span
-      className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${style[status] ?? 'bg-zinc-100 text-zinc-700'}`}
+      className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+        styles[status] ?? styles.draft
+      }`}
     >
       {status}
     </span>
