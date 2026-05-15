@@ -260,3 +260,101 @@ export async function bulkSplitExistingNames(): Promise<{
   revalidatePath('/contacts');
   return { ok: true, processed, skipped };
 }
+
+/**
+ * Hard-delete a batch of contacts by id. Cascades through any FKs (campaign_recipients
+ * are linked to email events, not contacts directly, so no cleanup needed).
+ *
+ * No-op when the id list is empty. Returns the count actually deleted so the UI
+ * can show a confirmation toast.
+ */
+export async function bulkDeleteContacts(
+  ids: string[],
+): Promise<{ ok: boolean; deleted: number; error?: string }> {
+  await requireRole('admin');
+  if (ids.length === 0) return { ok: true, deleted: 0 };
+  const supabase = await createClient();
+  const { error, count } = await supabase
+    .from('contacts')
+    .delete({ count: 'exact' })
+    .in('id', ids);
+  if (error) return { ok: false, deleted: 0, error: error.message };
+  revalidatePath('/contacts');
+  revalidatePath('/lists');
+  return { ok: true, deleted: count ?? ids.length };
+}
+
+/**
+ * Create a brand-new list and append the given contact ids to its `lists`
+ * uuid[] column in one shot. Used by the bulk "Pull selected into new list"
+ * action on the contacts page.
+ */
+export async function createListAndAssignContacts(
+  listName: string,
+  contactIds: string[],
+): Promise<{ ok: boolean; listId?: string; assigned?: number; error?: string }> {
+  await requireRole('editor');
+  const trimmed = listName.trim();
+  if (!trimmed) return { ok: false, error: 'Nome da lista é obrigatório.' };
+  if (contactIds.length === 0) return { ok: false, error: 'Nenhum contato selecionado.' };
+
+  const supabase = await createClient();
+  const { data: list, error: listErr } = await supabase
+    .from('lists')
+    .insert({ name: trimmed })
+    .select('id')
+    .single();
+  if (listErr || !list) return { ok: false, error: listErr?.message ?? 'Falha ao criar lista.' };
+
+  // Append the new list id to each contact's `lists` array (skip dupes).
+  const { data: rows } = await supabase
+    .from('contacts')
+    .select('id, lists')
+    .in('id', contactIds);
+  let assigned = 0;
+  for (const row of rows ?? []) {
+    const current = (row.lists ?? []) as string[];
+    if (current.includes(list.id)) continue;
+    const { error: updErr } = await supabase
+      .from('contacts')
+      .update({ lists: [...current, list.id] })
+      .eq('id', row.id);
+    if (!updErr) assigned++;
+  }
+
+  revalidatePath('/contacts');
+  revalidatePath('/lists');
+  revalidatePath(`/lists/${list.id}`);
+  return { ok: true, listId: list.id, assigned };
+}
+
+/**
+ * Append a batch of contacts to an existing list. Mirror of the importer's
+ * list-assignment logic — idempotent (skips contacts already in the list).
+ */
+export async function addContactsToExistingList(
+  listId: string,
+  contactIds: string[],
+): Promise<{ ok: boolean; assigned?: number; error?: string }> {
+  await requireRole('editor');
+  if (contactIds.length === 0) return { ok: false, error: 'Nenhum contato selecionado.' };
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from('contacts')
+    .select('id, lists')
+    .in('id', contactIds);
+  let assigned = 0;
+  for (const row of rows ?? []) {
+    const current = (row.lists ?? []) as string[];
+    if (current.includes(listId)) continue;
+    const { error: updErr } = await supabase
+      .from('contacts')
+      .update({ lists: [...current, listId] })
+      .eq('id', row.id);
+    if (!updErr) assigned++;
+  }
+  revalidatePath('/contacts');
+  revalidatePath('/lists');
+  revalidatePath(`/lists/${listId}`);
+  return { ok: true, assigned };
+}

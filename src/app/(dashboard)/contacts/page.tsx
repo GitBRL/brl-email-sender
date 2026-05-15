@@ -1,13 +1,11 @@
 import Link from 'next/link';
-import { Plus, Upload, Search, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { Plus, Upload, Search } from 'lucide-react';
 import { BulkSplitButton } from './_bulk-split-button';
 import { createClient } from '@/lib/supabase/server';
 import { requireProfile } from '@/lib/auth';
-import { TagSelect } from '@/components/tag-select';
-import { StatusBadge } from '@/components/status-badge';
 import type { Contact, ContactStatus, ContactTag } from '@/types';
 import { ContactsFilters } from './_filters';
-import { DeleteContactButton } from './_delete-button';
+import { ContactsTable } from './_contacts-table';
 
 const PAGE_SIZE = 25;
 
@@ -68,15 +66,22 @@ export default async function ContactsPage({
   if (status) query = query.eq('status', status);
   if (q) query = query.or(`email.ilike.%${q}%,name.ilike.%${q}%,last_name.ilike.%${q}%,company.ilike.%${q}%`);
 
-  const { data: contacts, count } = await query;
+  const [{ data: contacts, count }, { data: listsRaw }] = await Promise.all([
+    query,
+    // Lists fed to the bulk action bar's "Add to existing list" dropdown
+    supabase.from('lists').select('id, name').order('name'),
+  ]);
   const total = count ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const lists = (listsRaw ?? []) as Array<{ id: string; name: string }>;
 
   const canEdit = profile.role === 'admin' || profile.role === 'editor';
+  const canDelete = profile.role === 'admin';
 
-  // Build a query-string helper that preserves filters + page when only
-  // changing the sort key/direction (and resets to page 1 on sort change).
-  function sortHref(key: SortKey): string {
+  // Precompute hrefs for every sortable column so we can hand the client
+  // component a plain object (functions can't cross the server-client boundary).
+  const sortHrefs: Record<SortKey, string> = {} as Record<SortKey, string>;
+  for (const key of ['name', 'last_name', 'email', 'company', 'created_at'] as SortKey[]) {
     const sameKey = sort === key;
     const nextDir: SortDir = sameKey ? (dir === 'asc' ? 'desc' : 'asc') : key === 'created_at' ? 'desc' : 'asc';
     const params = new URLSearchParams({
@@ -86,7 +91,7 @@ export default async function ContactsPage({
       sort: key,
       dir: nextDir,
     });
-    return `?${params.toString()}`;
+    sortHrefs[key] = `?${params.toString()}`;
   }
 
   return (
@@ -119,75 +124,24 @@ export default async function ContactsPage({
 
       <ContactsFilters tag={tag} status={status} q={q} />
 
-      <div className="bg-white rounded-lg border border-zinc-200 overflow-hidden">
-        {(contacts ?? []).length === 0 ? (
-          <div className="p-12 text-center">
-            <Search size={20} className="text-zinc-400 inline-block" />
-            <p className="text-sm text-zinc-500 mt-2">
-              No contacts found{q || tag || status ? ' with these filters' : ''}.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-xs text-zinc-500 uppercase tracking-wide bg-zinc-50">
-                <tr>
-                  <SortHeader label="Email"     active={sort === 'email'}      dir={dir} href={sortHref('email')} />
-                  <SortHeader label="Name"      active={sort === 'name'}       dir={dir} href={sortHref('name')} />
-                  <SortHeader label="Last name" active={sort === 'last_name'}  dir={dir} href={sortHref('last_name')} />
-                  <SortHeader label="Company"   active={sort === 'company'}    dir={dir} href={sortHref('company')} />
-                  <th className="text-left font-medium px-4 py-3">Tag</th>
-                  <th className="text-left font-medium px-4 py-3">Status</th>
-                  <SortHeader label="Added"     active={sort === 'created_at'} dir={dir} href={sortHref('created_at')} />
-                  <th className="text-right font-medium px-4 py-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100">
-                {(contacts as Contact[]).map((c) => (
-                  <tr key={c.id} className="hover:bg-zinc-50">
-                    <td className="px-4 py-3">
-                      <Link href={`/contacts/${c.id}`} className="text-brl-dark hover:underline font-medium">
-                        {c.email}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-zinc-700">{c.name ?? '—'}</td>
-                    <td className="px-4 py-3 text-zinc-700">{c.last_name ?? '—'}</td>
-                    <td className="px-4 py-3 text-zinc-700">{c.company ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      {canEdit ? <TagSelect contactId={c.id} value={c.tag} /> : <span>{c.tag}</span>}
-                    </td>
-                    <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
-                    <td className="px-4 py-3 text-xs text-zinc-500">
-                      {new Date(c.created_at).toLocaleDateString('pt-BR')}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="inline-flex items-center gap-2">
-                        <Link
-                          href={`/contacts/${c.id}`}
-                          className="text-xs text-zinc-600 hover:text-brl-dark"
-                        >
-                          View
-                        </Link>
-                        {canEdit && (
-                          <Link
-                            href={`/contacts/${c.id}/edit`}
-                            className="text-xs text-zinc-600 hover:text-brl-dark"
-                          >
-                            Edit
-                          </Link>
-                        )}
-                        {profile.role === 'admin' && (
-                          <DeleteContactButton id={c.id} email={c.email} />
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {(contacts ?? []).length === 0 ? (
+        <div className="bg-white rounded-lg border border-zinc-200 p-12 text-center">
+          <Search size={20} className="text-zinc-400 inline-block" />
+          <p className="text-sm text-zinc-500 mt-2">
+            No contacts found{q || tag || status ? ' with these filters' : ''}.
+          </p>
+        </div>
+      ) : (
+        <ContactsTable
+          contacts={(contacts ?? []) as Contact[]}
+          lists={lists}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          sort={sort}
+          dir={dir}
+          sortHrefs={sortHrefs}
+        />
+      )}
 
       {pageCount > 1 && (
         <div className="flex items-center justify-between mt-4 text-sm">
@@ -232,36 +186,3 @@ export default async function ContactsPage({
   );
 }
 
-/**
- * Sortable column header. Shows an arrow when active (↑ asc, ↓ desc) and a
- * dimmed up-down icon when inactive so users know they can click to sort.
- */
-function SortHeader({
-  label,
-  active,
-  dir,
-  href,
-}: {
-  label: string;
-  active: boolean;
-  dir: SortDir;
-  href: string;
-}) {
-  return (
-    <th className="text-left font-medium px-4 py-3">
-      <Link
-        href={href}
-        className={`inline-flex items-center gap-1 hover:text-brl-dark transition ${
-          active ? 'text-brl-dark' : 'text-zinc-500'
-        }`}
-      >
-        {label}
-        {active ? (
-          dir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />
-        ) : (
-          <ArrowUpDown size={11} className="opacity-30" />
-        )}
-      </Link>
-    </th>
-  );
-}
