@@ -6,6 +6,7 @@ import { requireProfile } from '@/lib/auth';
 import { SparkLine } from '@/components/charts/spark-line';
 import { BarList } from '@/components/charts/bar-list';
 import { RangeSelector } from './_range-selector';
+import { getResendMonthlyUsage } from '@/lib/resend-usage';
 
 /**
  * Dashboard. The three primary charts (Audience growth / Sent over time /
@@ -80,6 +81,10 @@ export default async function DashboardPage({
     sendEventsRes,
     monthSendCountRes,
     appSettingsRes,
+    // Resend's actual API count for this month (cached 10 min).
+    // Counts EVERY email sent through the Resend key (incl. external sends);
+    // local count covers only sends through this app's pipeline.
+    resendUsage,
   ] = await Promise.all([
     supabase.from('contacts').select('id, tag, status, created_at'),
     supabase.from('campaigns').select('*', { count: 'exact', head: true }).eq('status', 'sent'),
@@ -117,6 +122,7 @@ export default async function DashboardPage({
       .select('resend_monthly_limit')
       .eq('id', true)
       .maybeSingle<{ resend_monthly_limit: number | null }>(),
+    getResendMonthlyUsage(),
   ]);
 
   const contacts = contactsAgg.data ?? [];
@@ -177,10 +183,14 @@ export default async function DashboardPage({
   }
   const totalSentInRange = sentPerDay.reduce((a, b) => a + b, 0);
 
-  // 3) Resend monthly quota — limit comes from (in order): app_settings row
-  //    (operator-editable in /settings), then RESEND_MONTHLY_LIMIT env var,
-  //    then 3000 (free tier default).
-  const sentThisMonth = monthSendCountRes.count ?? 0;
+  // 3) Resend monthly quota — usage from Resend's API (real number, includes
+  //    every email sent with the API key). Falls back to local email_events
+  //    count if the API call failed. Limit from app_settings → env → 3000.
+  const localSentThisMonth = monthSendCountRes.count ?? 0;
+  const sentThisMonth = resendUsage.error
+    ? localSentThisMonth
+    : resendUsage.sentThisMonth;
+  const usageSource: 'resend-api' | 'local' = resendUsage.error ? 'local' : 'resend-api';
   const monthlyLimit =
     appSettingsRes.data?.resend_monthly_limit ??
     RESEND_MONTHLY_LIMIT;
@@ -291,11 +301,27 @@ export default async function DashboardPage({
 
           {/* Resend monthly quota — always current calendar month */}
           <div className="bg-white rounded-lg border border-zinc-200 p-5">
-            <div className="flex items-baseline justify-between mb-3">
+            <div className="flex items-baseline justify-between mb-1">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                 Cota Resend
               </h3>
               <span className="text-[10px] text-zinc-500 capitalize">{monthName}</span>
+            </div>
+            <div className="mb-3">
+              {usageSource === 'resend-api' ? (
+                <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-1.5 py-0.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Direto da API Resend
+                </span>
+              ) : (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5"
+                  title={resendUsage.error ?? 'Resend API unavailable'}
+                >
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  Contagem local (API offline)
+                </span>
+              )}
             </div>
             <div className="text-2xl font-bold tabular-nums">
               {remaining.toLocaleString('pt-BR')}
