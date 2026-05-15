@@ -44,6 +44,8 @@ export type ContactList = {
   id: string;
   name: string;
   description: string | null;
+  /** Free-form labels (origem, persona, evento) set by the operator. */
+  tags: string[] | null;
   contact_count: number;
   created_at: string;
 };

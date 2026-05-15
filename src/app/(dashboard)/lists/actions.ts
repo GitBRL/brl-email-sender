@@ -5,9 +5,35 @@ import { z } from 'zod';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/auth';
 
+/** Normalise a free-form tags string (comma or newline separated) into a
+ *  lowercase, deduped, sorted array. Empty strings collapse to []. */
+function parseTags(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return Array.from(
+      new Set(
+        raw
+          .map((s) => String(s).trim().toLowerCase())
+          .filter((s) => s.length > 0 && s.length <= 40),
+      ),
+    ).sort();
+  }
+  if (typeof raw === 'string') {
+    return Array.from(
+      new Set(
+        raw
+          .split(/[,\n]+/)
+          .map((s) => s.trim().toLowerCase())
+          .filter((s) => s.length > 0 && s.length <= 40),
+      ),
+    ).sort();
+  }
+  return [];
+}
+
 const ListInput = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
   description: z.string().trim().max(500).optional().or(z.literal('')).transform((v) => v || null),
+  tags: z.unknown().transform((v) => parseTags(v)),
 });
 
 export type ActionState = { ok: boolean; error?: string; id?: string };
@@ -30,10 +56,16 @@ export async function createList(_prev: ActionState, formData: FormData): Promis
   return { ok: true, id: data.id };
 }
 
-export async function updateList(id: string, patch: { name?: string; description?: string | null }): Promise<ActionState> {
+export async function updateList(
+  id: string,
+  patch: { name?: string; description?: string | null; tags?: string[] },
+): Promise<ActionState> {
   await requireRole('editor');
   const supabase = createServiceClient();
-  const { error } = await supabase.from('lists').update(patch).eq('id', id);
+  // Normalise tags on update so callers don't have to remember the rules
+  const normalised = { ...patch };
+  if (patch.tags !== undefined) normalised.tags = parseTags(patch.tags);
+  const { error } = await supabase.from('lists').update(normalised).eq('id', id);
   if (error) return { ok: false, error: error.message };
   revalidatePath('/lists');
   revalidatePath(`/lists/${id}`);

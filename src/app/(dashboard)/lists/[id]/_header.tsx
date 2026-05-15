@@ -5,15 +5,18 @@ import { useRouter } from 'next/navigation';
 import { Pencil, Check, X, Trash2 } from 'lucide-react';
 import { updateList, deleteList } from '../actions';
 import type { ContactList } from '@/types';
+import { TagsInput } from '../_tags-input';
 
 export function ListHeader({
   list,
   canEdit,
   canDelete,
+  tagSuggestions = [],
 }: {
-  list: ContactList;
+  list: ContactList & { tags?: string[] | null };
   canEdit: boolean;
   canDelete: boolean;
+  tagSuggestions?: string[];
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -22,10 +25,19 @@ export function ListHeader({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function save() {
+  function save(formData: FormData) {
     setError(null);
+    const tagsRaw = String(formData.get('tags') ?? '');
+    const tags = tagsRaw
+      .split(/[,\n]+/)
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.length > 0 && s.length <= 40);
     start(async () => {
-      const res = await updateList(list.id, { name, description: description || null });
+      const res = await updateList(list.id, {
+        name,
+        description: description || null,
+        tags,
+      });
       if (!res.ok) setError(res.error ?? 'Failed to save');
       else {
         setEditing(false);
@@ -45,7 +57,10 @@ export function ListHeader({
 
   if (editing) {
     return (
-      <div className="bg-white border border-zinc-200 rounded-lg p-5 space-y-3">
+      <form
+        action={save}
+        className="bg-white border border-zinc-200 rounded-lg p-5 space-y-3"
+      >
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -56,8 +71,12 @@ export function ListHeader({
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
           className="w-full text-sm rounded-md border border-zinc-300 px-3 py-2 outline-none focus:border-brl-dark resize-none"
-          placeholder="Description"
+          placeholder="Descrição"
         />
+        <div>
+          <span className="text-xs font-medium text-zinc-600 mb-1 block">Tags</span>
+          <TagsInput name="tags" defaultValue={list.tags ?? []} suggestions={tagSuggestions} />
+        </div>
         {error && <p className="text-sm text-brl-error">{error}</p>}
         <div className="flex gap-2 justify-end">
           <button
@@ -68,15 +87,14 @@ export function ListHeader({
             <X size={14} /> Cancel
           </button>
           <button
-            type="button"
-            onClick={save}
+            type="submit"
             disabled={pending || !name.trim()}
             className="inline-flex items-center gap-1 rounded-md bg-brl-yellow text-brl-dark font-semibold px-3 py-1.5 text-sm hover:bg-brl-yellow-hover disabled:opacity-50"
           >
             <Check size={14} /> {pending ? 'Saving…' : 'Save'}
           </button>
         </div>
-      </div>
+      </form>
     );
   }
 
@@ -85,6 +103,18 @@ export function ListHeader({
       <div className="min-w-0">
         <h1 className="text-2xl font-bold">{list.name}</h1>
         {list.description && <p className="text-sm text-zinc-500 mt-1">{list.description}</p>}
+        {(list.tags ?? []).length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {(list.tags ?? []).map((t) => (
+              <span
+                key={t}
+                className="inline-block rounded-full bg-brl-yellow/30 text-brl-dark text-[11px] px-2 py-0.5"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       {(canEdit || canDelete) && (
         <div className="flex gap-2 shrink-0">

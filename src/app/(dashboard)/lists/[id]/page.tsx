@@ -41,13 +41,21 @@ export default async function ListDetailPage({ params }: { params: Promise<{ id:
   const canEdit = profile.role === 'admin' || profile.role === 'editor';
   const canDelete = profile.role === 'admin';
 
+  // Tag suggestions for the inline edit form (every tag used across all lists)
+  const { data: allTagsRows } = await supabase.from('lists').select('tags');
+  const tagSet = new Set<string>();
+  for (const r of (allTagsRows ?? []) as Array<{ tags: string[] | null }>) {
+    for (const t of r.tags ?? []) tagSet.add(t);
+  }
+  const tagSuggestions = Array.from(tagSet).sort();
+
   return (
     <div className="p-8 max-w-5xl">
       <Link href="/lists" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-brl-dark mb-4">
         <ChevronLeft size={14} /> Back to lists
       </Link>
 
-      <ListHeader list={list} canEdit={canEdit} canDelete={canDelete} />
+      <ListHeader list={list} canEdit={canEdit} canDelete={canDelete} tagSuggestions={tagSuggestions} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-6">
         <div className="bg-white rounded-lg border border-zinc-200 p-5">

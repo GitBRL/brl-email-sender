@@ -7,6 +7,7 @@ type ListRow = {
   id: string;
   name: string;
   description: string | null;
+  tags: string[] | null;
   contact_count: number;
   created_at: string;
 };
@@ -70,6 +71,18 @@ export default async function ListsPage() {
                     </div>
                   </div>
                 </div>
+                {(l.tags ?? []).length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-3">
+                    {(l.tags ?? []).map((t) => (
+                      <span
+                        key={t}
+                        className="inline-block rounded-full bg-brl-yellow/30 text-brl-dark text-[10px] px-2 py-0.5"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="text-[10px] text-zinc-400 mt-3">
                   Created {new Date(l.created_at).toLocaleDateString('pt-BR')}
                 </div>
