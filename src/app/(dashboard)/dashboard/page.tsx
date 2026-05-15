@@ -258,6 +258,26 @@ export default async function DashboardPage({
           </Suspense>
         </div>
 
+        {/* Engagement (opens vs clicks) — first item under Métricas. Keeps
+            its own fixed 30d window so the open/click rates above stay
+            comparable independent of the range selector. */}
+        <div className="bg-white rounded-lg border border-zinc-200 p-6">
+          <div className="flex items-baseline justify-between mb-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Engajamento
+            </h3>
+            <span className="text-[10px] text-zinc-500">últimos 30 dias</span>
+          </div>
+          <SparkLine
+            labels={engagementLabels}
+            series={[
+              { name: 'Opens', color: '#10b981', data: engOpens },
+              { name: 'Clicks', color: '#3b82f6', data: engClicks },
+            ]}
+            height={200}
+          />
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Audience growth — pure contacts count cumulative */}
           <div className="bg-white rounded-lg border border-zinc-200 p-5">
@@ -353,21 +373,6 @@ export default async function DashboardPage({
             )}
           </div>
         </div>
-      </section>
-
-      {/* Engagement (opens vs clicks) — keeps its dedicated 30d view -------- */}
-      <section className="bg-white rounded-lg border border-zinc-200 p-6">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-4">
-          Engajamento — últimos 30 dias
-        </h2>
-        <SparkLine
-          labels={engagementLabels}
-          series={[
-            { name: 'Opens', color: '#10b981', data: engOpens },
-            { name: 'Clicks', color: '#3b82f6', data: engClicks },
-          ]}
-          height={200}
-        />
       </section>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
