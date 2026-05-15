@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ChevronLeft, Users } from 'lucide-react';
+import { ChevronLeft, Users, Upload } from 'lucide-react';
 import { requireProfile } from '@/lib/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { TagBadge } from '@/components/tag-badge';
@@ -73,6 +73,20 @@ export default async function ListDetailPage({ params }: { params: Promise<{ id:
           </div>
         </div>
       </div>
+
+      {canEdit && (
+        <div className="mb-6 flex flex-wrap items-center gap-3 bg-white rounded-lg border border-zinc-200 p-4">
+          <Link
+            href={`/contacts/import?list=${list.id}`}
+            className="inline-flex items-center gap-1.5 rounded-md bg-brl-yellow text-brl-dark font-semibold px-3 py-2 text-sm hover:bg-brl-yellow-hover"
+          >
+            <Upload size={14} /> Importar contatos para esta lista
+          </Link>
+          <span className="text-xs text-zinc-500">
+            Sobe um CSV — todos os contatos vão direto pra lista <strong>{list.name}</strong>.
+          </span>
+        </div>
+      )}
 
       {canEdit && eligible.length > 0 && (
         <div className="mb-6">

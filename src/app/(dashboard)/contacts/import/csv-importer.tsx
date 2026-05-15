@@ -118,8 +118,13 @@ type TagOverride = 'keep' | 'hot' | 'warm' | 'cold';
 
 export function CsvImporter({
   existingLists = [],
+  initialListAssignment,
 }: {
   existingLists?: Array<{ id: string; name: string }>;
+  /** When provided, the 'Salvar em uma lista' card defaults to this assignment
+   *  instead of 'create new with auto-suggested name'. Used by
+   *  /contacts/import?list=<id> (the deep-link from the list detail page). */
+  initialListAssignment?: ListAssignment;
 }) {
   const router = useRouter();
   const [headers, setHeaders] = useState<string[]>([]);
@@ -136,11 +141,17 @@ export function CsvImporter({
   const [error, setError] = useState<string | null>(null);
   // List assignment — default to "create new" since that's the dominant case
   // when importing a fresh CSV. The new-list name is auto-suggested from the
-  // file name on upload.
-  const [listAssignment, setListAssignment] = useState<ListAssignment>({
-    kind: 'new',
-    name: '',
-  });
+  // file name on upload. When the page is loaded with ?list=<id> the parent
+  // overrides this to 'existing' targeting that list.
+  const [listAssignment, setListAssignment] = useState<ListAssignment>(
+    initialListAssignment ?? { kind: 'new', name: '' },
+  );
+  // Find a friendly label for the pre-targeted list, so we can show a banner
+  // at the top of the importer telling the user what's about to happen.
+  const lockedTargetList =
+    initialListAssignment?.kind === 'existing'
+      ? existingLists.find((l) => l.id === initialListAssignment.id) ?? null
+      : null;
   // Tag override — applied uniformly to all imported rows. 'keep' (default)
   // respects whatever the per-column tag mapping (or its absence) produced.
   const [tagOverride, setTagOverride] = useState<TagOverride>('keep');
@@ -326,6 +337,15 @@ export function CsvImporter({
   // -------------- Upload + mapping view --------------
   return (
     <div className="space-y-4">
+      {lockedTargetList && (
+        <div className="bg-brl-yellow/10 border border-brl-yellow/40 rounded-lg p-4 text-sm flex items-center gap-2">
+          <span className="text-brl-dark">📥</span>
+          <div className="flex-1">
+            Importando para a lista <strong>{lockedTargetList.name}</strong>.
+            Os contatos do CSV vão ser adicionados a ela automaticamente após o import.
+          </div>
+        </div>
+      )}
       <div className="bg-white rounded-lg border border-zinc-200 p-6">
         <label className="cursor-pointer block">
           <div className="border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center hover:border-brl-yellow transition">
