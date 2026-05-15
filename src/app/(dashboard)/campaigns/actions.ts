@@ -907,3 +907,148 @@ export async function getCampaignRecipientsByGroup(
     .order('email');
   return (data ?? []) as RecipientRow[];
 }
+
+// =====================================================================
+// Resend / re-send / clone-with-new-audience
+// =====================================================================
+
+export type ResendAudience =
+  | { kind: 'list'; listId: string }
+  | { kind: 'cohort'; group: RecipientGroup };
+
+/**
+ * Clone a sent campaign as a fresh draft pointing at a new audience.
+ *
+ * Two audience flavours:
+ *   - 'list' — the new draft uses an existing list (operator picks any list
+ *     from /lists)
+ *   - 'cohort' — pulls the contacts from a funnel cohort of the ORIGINAL
+ *     campaign (e.g. 'opened', 'not_opened', 'clicked'), spins up a brand
+ *     new list with an auto-generated name + tags, and points the draft at
+ *     that list. This is the "re-engage everyone who didn't open" workflow.
+ *
+ * Template, brand_kit, subject, from_*, reply_to are all copied as-is —
+ * the operator can tweak them in the wizard before sending.
+ *
+ * Returns the new draft id so the caller can navigate to /campaigns/new?id=...
+ */
+export async function resendCampaign(
+  originalId: string,
+  audience: ResendAudience,
+): Promise<{ ok: true; newCampaignId: string; listName?: string } | { ok: false; error: string }> {
+  const profile = await requireRole('editor');
+  const supabase = createServiceClient();
+
+  // 1. Load the original
+  const { data: orig, error: origErr } = await supabase
+    .from('campaigns')
+    .select('id, name, subject, from_name, from_email, reply_to, template_id, brand_kit_id, filter_tag')
+    .eq('id', originalId)
+    .maybeSingle();
+  if (origErr || !orig) return { ok: false, error: origErr?.message ?? 'Original campaign not found.' };
+  if (!orig.template_id) return { ok: false, error: 'Original has no template — nothing to clone.' };
+
+  // 2. Resolve the audience → a list_ids array
+  let listIds: string[] = [];
+  let createdListName: string | undefined;
+
+  if (audience.kind === 'list') {
+    const { data: list } = await supabase
+      .from('lists')
+      .select('id, name')
+      .eq('id', audience.listId)
+      .maybeSingle();
+    if (!list) return { ok: false, error: 'List not found.' };
+    listIds = [list.id];
+    createdListName = list.name;
+  } else {
+    // Cohort path — pull the cohort's contact ids from the original campaign,
+    // spin up a fresh list, append the contacts, point the draft at it.
+    const cohort = await getCampaignRecipientsByGroup(originalId, audience.group);
+    if (cohort.length === 0) {
+      return {
+        ok: false,
+        error: `Nenhum contato no grupo "${audience.group}" da campanha original.`,
+      };
+    }
+    const cohortLabel = cohortLabelFor(audience.group);
+    const slugCampaign = (orig.name ?? 'campanha')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40);
+    const slugCohort = audience.group.replace(/_/g, '-');
+    const newListName = `${orig.name ?? 'Campanha'} — ${cohortLabel}`;
+    const tags = ['re-envio', slugCampaign, slugCohort].filter(Boolean);
+
+    // Create the list
+    const { data: newList, error: listErr } = await supabase
+      .from('lists')
+      .insert({
+        name: newListName,
+        description: `Re-envio: ${cohortLabel} da campanha "${orig.name}".`,
+        tags,
+      })
+      .select('id, name')
+      .single();
+    if (listErr || !newList) return { ok: false, error: listErr?.message ?? 'Falha ao criar lista.' };
+
+    // Append the cohort to the new list
+    const { data: contactRows } = await supabase
+      .from('contacts')
+      .select('id, lists')
+      .in('id', cohort.map((c) => c.id));
+    for (const c of (contactRows ?? []) as Array<{ id: string; lists: string[] | null }>) {
+      const current = c.lists ?? [];
+      if (current.includes(newList.id)) continue;
+      await supabase.from('contacts').update({ lists: [...current, newList.id] }).eq('id', c.id);
+    }
+
+    listIds = [newList.id];
+    createdListName = newList.name;
+  }
+
+  // 3. Insert the new draft, copying everything from the original
+  const newName = `${orig.name ?? 'Campanha'} (re-envio)`;
+  const { data: newCampaign, error: insertErr } = await supabase
+    .from('campaigns')
+    .insert({
+      name: newName,
+      subject: orig.subject,
+      from_name: orig.from_name,
+      from_email: orig.from_email,
+      reply_to: orig.reply_to,
+      template_id: orig.template_id,
+      brand_kit_id: orig.brand_kit_id,
+      list_ids: listIds,
+      filter_tag: orig.filter_tag,
+      status: 'draft',
+      approval_status: 'not_required',
+      created_by: profile.id,
+    })
+    .select('id')
+    .single();
+  if (insertErr || !newCampaign) {
+    return { ok: false, error: insertErr?.message ?? 'Falha ao clonar campanha.' };
+  }
+
+  revalidatePath('/campaigns');
+  revalidatePath('/lists');
+  return { ok: true, newCampaignId: newCampaign.id, listName: createdListName };
+}
+
+function cohortLabelFor(group: RecipientGroup): string {
+  switch (group) {
+    case 'recipients': return 'destinatários';
+    case 'sent': return 'enviados';
+    case 'delivered': return 'entregues';
+    case 'opened': return 'abriram';
+    case 'clicked': return 'clicaram';
+    case 'bounced': return 'bounced';
+    case 'complained': return 'reclamações';
+    case 'not_opened': return 'não abriram';
+    case 'opened_no_click': return 'abriram sem clicar';
+  }
+}

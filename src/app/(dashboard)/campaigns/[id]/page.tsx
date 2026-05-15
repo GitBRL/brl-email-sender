@@ -6,6 +6,8 @@ import { requireProfile } from '@/lib/auth';
 import { pct } from '@/lib/utils';
 import { SendNowButton } from './_send-button';
 import { CampaignRowActions } from '../_row-actions';
+import { ResendButton } from './_resend-button';
+import type { RecipientGroup } from '../actions';
 import { SparkLine } from '@/components/charts/spark-line';
 import { BarList } from '@/components/charts/bar-list';
 
@@ -72,6 +74,27 @@ export default async function CampaignDetailPage({
   const openRate = pct(uniqueOpens.size, total);
   const clickRate = pct(uniqueClicks.size, total);
   const ctr = uniqueOpens.size > 0 ? pct(uniqueClicks.size, uniqueOpens.size) : 0;
+
+  // Per-cohort counts for the Resend modal. Use the deduped sets where it
+  // makes sense; fall back to event totals for sent/delivered/bounced/complained.
+  const cohortAvailability: Partial<Record<RecipientGroup, number>> = {
+    recipients: campaign.total_recipients ?? 0,
+    sent: counts.sent,
+    delivered: counts.delivered,
+    opened: uniqueOpens.size,
+    clicked: uniqueClicks.size,
+    bounced: counts.bounced,
+    complained: counts.complained,
+    not_opened: Math.max(0, (campaign.total_recipients ?? 0) - uniqueOpens.size),
+    opened_no_click: Array.from(uniqueOpens).filter((id) => !uniqueClicks.has(id)).length,
+  };
+
+  // Existing lists for the 'pick a list' tab in the Resend modal
+  const { data: existingListsRaw } = await supabase
+    .from('list_counts')
+    .select('id, name, contact_count')
+    .order('name');
+  const existingLists = (existingListsRaw ?? []) as Array<{ id: string; name: string; contact_count: number }>;
 
   // ---- Time series: bucket opens & clicks by hour or day after sent_at ----
   const sentAt = campaign.sent_at ? new Date(campaign.sent_at) : null;
@@ -226,6 +249,14 @@ export default async function CampaignDetailPage({
             </Link>
           )}
           {canEdit && campaign.status === 'draft' && <SendNowButton id={campaign.id} />}
+          {canEdit && campaign.status === 'sent' && (
+            <ResendButton
+              campaignId={campaign.id}
+              campaignName={campaign.name}
+              existingLists={existingLists}
+              cohortAvailability={cohortAvailability}
+            />
+          )}
           <CampaignRowActions id={campaign.id} name={campaign.name} canDelete={canDelete} />
         </div>
       </header>
