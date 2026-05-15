@@ -237,15 +237,16 @@ export default async function CampaignDetailPage({
         <BigStat label="Click-to-open" value={`${ctr}%`} sub="clicks ÷ opens" accent="zinc" />
       </section>
 
-      {/* Funnel counts */}
+      {/* Funnel counts — every card with a non-zero value drills into the
+          /recipients page filtered for that cohort. */}
       <section className="grid grid-cols-2 md:grid-cols-7 gap-3">
-        <Stat label="Recipients" value={campaign.total_recipients} />
-        <Stat label="Sent" value={counts.sent} />
-        <Stat label="Delivered" value={counts.delivered} />
-        <Stat label="Opens" value={counts.opened} />
-        <Stat label="Clicks" value={counts.clicked} />
-        <Stat label="Bounced" value={counts.bounced} flag={counts.bounced > 0 ? 'red' : undefined} />
-        <Stat label="Complaints" value={counts.complained} flag={counts.complained > 0 ? 'red' : undefined} />
+        <Stat label="Recipients" value={campaign.total_recipients ?? 0} href={`/campaigns/${campaign.id}/recipients?group=recipients`} />
+        <Stat label="Sent"       value={counts.sent}                      href={`/campaigns/${campaign.id}/recipients?group=sent`} />
+        <Stat label="Delivered"  value={counts.delivered}                 href={`/campaigns/${campaign.id}/recipients?group=delivered`} />
+        <Stat label="Opens"      value={counts.opened}                    href={`/campaigns/${campaign.id}/recipients?group=opened`} />
+        <Stat label="Clicks"     value={counts.clicked}                   href={`/campaigns/${campaign.id}/recipients?group=clicked`} />
+        <Stat label="Bounced"    value={counts.bounced}    flag={counts.bounced > 0 ? 'red' : undefined}    href={`/campaigns/${campaign.id}/recipients?group=bounced`} />
+        <Stat label="Complaints" value={counts.complained} flag={counts.complained > 0 ? 'red' : undefined} href={`/campaigns/${campaign.id}/recipients?group=complained`} />
       </section>
 
       {/* Time series */}
@@ -364,18 +365,27 @@ function Stat({
   label,
   value,
   flag,
+  href,
 }: {
   label: string;
   value: number;
   flag?: 'red';
+  /** Optional drill-down URL — when set + value > 0 the card becomes a link
+   *  to the recipients page filtered for this cohort. */
+  href?: string;
 }) {
-  return (
+  const inner = (
     <div
-      className={`bg-white border rounded-lg p-3 ${
+      className={`bg-white border rounded-lg p-3 transition ${
         flag === 'red' ? 'border-red-200' : 'border-zinc-200'
-      }`}
+      } ${href && (value ?? 0) > 0 ? 'hover:border-brl-yellow hover:bg-brl-yellow/5 cursor-pointer' : ''}`}
     >
-      <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="text-[10px] uppercase tracking-wide text-zinc-500 flex items-center justify-between">
+        <span>{label}</span>
+        {href && (value ?? 0) > 0 && (
+          <span className="text-zinc-300 group-hover:text-zinc-500" aria-hidden>›</span>
+        )}
+      </div>
       <div
         className={`text-xl font-bold mt-1 tabular-nums ${
           flag === 'red' ? 'text-red-700' : ''
@@ -385,6 +395,14 @@ function Stat({
       </div>
     </div>
   );
+  if (href && (value ?? 0) > 0) {
+    return (
+      <Link href={href} className="group block">
+        {inner}
+      </Link>
+    );
+  }
+  return inner;
 }
 
 function BigStat({

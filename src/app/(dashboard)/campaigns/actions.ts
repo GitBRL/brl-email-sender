@@ -794,3 +794,116 @@ export async function listApprovals(campaignId: string): Promise<ApprovalHistory
     .order('sent_at', { ascending: false });
   return (data ?? []) as ApprovalHistoryRow[];
 }
+
+// =====================================================================
+// Recipients-by-group (drill-down from the funnel stat cards)
+// =====================================================================
+
+/** Cohort buckets the operator can drill into from the campaign funnel. */
+export type RecipientGroup =
+  | 'recipients'      // every contact the campaign was queued for
+  | 'sent'            // emit-success events
+  | 'delivered'       // Resend delivered webhook
+  | 'opened'          // any open
+  | 'clicked'         // any click
+  | 'bounced'         // hard bounce
+  | 'complained'      // marked spam
+  | 'not_opened'      // recipients that did NOT open — re-engagement audience
+  | 'opened_no_click'; // opened but didn't click — soft-engaged audience
+
+export type RecipientRow = {
+  id: string;
+  email: string;
+  name: string | null;
+  last_name: string | null;
+  tag: ContactTag;
+  status: 'subscribed' | 'unsubscribed' | 'bounced';
+};
+
+/**
+ * Return the contacts in a campaign's funnel cohort. Used by the
+ * /campaigns/[id]/recipients?group=... drill-down page.
+ *
+ * Implementation:
+ *  - 'recipients': join campaign_recipients → contacts
+ *  - sent/delivered/opened/clicked/bounced/complained: distinct contact_ids
+ *    from email_events of that type, then look up the contacts
+ *  - not_opened: recipients minus opened
+ *  - opened_no_click: opened minus clicked
+ */
+export async function getCampaignRecipientsByGroup(
+  campaignId: string,
+  group: RecipientGroup,
+): Promise<RecipientRow[]> {
+  await requireRole('viewer');
+  const supabase = createServiceClient();
+
+  async function contactIdsForEvent(eventType: string): Promise<Set<string>> {
+    const { data } = await supabase
+      .from('email_events')
+      .select('contact_id')
+      .eq('campaign_id', campaignId)
+      .eq('event_type', eventType);
+    const set = new Set<string>();
+    for (const r of (data ?? []) as Array<{ contact_id: string | null }>) {
+      if (r.contact_id) set.add(r.contact_id);
+    }
+    return set;
+  }
+
+  async function recipientContactIds(): Promise<Set<string>> {
+    const { data } = await supabase
+      .from('campaign_recipients')
+      .select('contact_id')
+      .eq('campaign_id', campaignId);
+    const set = new Set<string>();
+    for (const r of (data ?? []) as Array<{ contact_id: string | null }>) {
+      if (r.contact_id) set.add(r.contact_id);
+    }
+    return set;
+  }
+
+  let ids: Set<string>;
+  switch (group) {
+    case 'recipients':
+      ids = await recipientContactIds();
+      break;
+    case 'sent':
+    case 'delivered':
+    case 'opened':
+    case 'clicked':
+    case 'bounced':
+    case 'complained':
+      ids = await contactIdsForEvent(group);
+      break;
+    case 'not_opened': {
+      const [recipients, opened] = await Promise.all([
+        recipientContactIds(),
+        contactIdsForEvent('opened'),
+      ]);
+      ids = new Set<string>();
+      for (const id of recipients) if (!opened.has(id)) ids.add(id);
+      break;
+    }
+    case 'opened_no_click': {
+      const [opened, clicked] = await Promise.all([
+        contactIdsForEvent('opened'),
+        contactIdsForEvent('clicked'),
+      ]);
+      ids = new Set<string>();
+      for (const id of opened) if (!clicked.has(id)) ids.add(id);
+      break;
+    }
+    default:
+      return [];
+  }
+
+  if (ids.size === 0) return [];
+
+  const { data } = await supabase
+    .from('contacts')
+    .select('id, email, name, last_name, tag, status')
+    .in('id', Array.from(ids))
+    .order('email');
+  return (data ?? []) as RecipientRow[];
+}
